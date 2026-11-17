@@ -47,7 +47,8 @@ object DxvkInstaller {
 
     private fun installOne(source: File, destination: File, backupDirectory: File) {
         val parent = destination.parentFile?.canonicalFile ?: error("Folder tujuan DLL tidak valid.")
-        if (destination.canonicalFile.parentFile != parent) error("Path DLL tujuan tidak valid.")
+        // Validate the parent without canonicalizing the leaf: Wine prefixes may use DLL symlinks.
+        if (destination.parentFile?.canonicalFile != parent) error("Path DLL tujuan tidak valid.")
         val backup = File(backupDirectory, destination.name)
         if (destination.isFile && !backup.exists()) copyFile(destination, backup)
 
