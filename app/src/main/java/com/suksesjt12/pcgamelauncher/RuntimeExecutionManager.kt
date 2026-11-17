@@ -3,6 +3,7 @@ package com.suksesjt12.pcgamelauncher
 import android.content.Context
 import java.io.File
 import java.io.IOException
+import java.io.RandomAccessFile
 import java.util.concurrent.TimeUnit
 
 /**
@@ -176,10 +177,14 @@ object RuntimeExecutionManager {
     private fun readLogTail(file: File): String {
         if (!file.isFile) return ""
         return try {
-            val bytes = file.readBytes()
-            val start = (bytes.size - MAX_LOG_BYTES).coerceAtLeast(0)
-            String(bytes, start, bytes.size - start, Charsets.UTF_8)
-                .replace("\u0000", "")
+            RandomAccessFile(file, "r").use { input ->
+                val start = (input.length() - MAX_LOG_BYTES).coerceAtLeast(0L)
+                val count = (input.length() - start).toInt()
+                val bytes = ByteArray(count)
+                input.seek(start)
+                input.readFully(bytes)
+                String(bytes, Charsets.UTF_8).filter { it.code != 0 }
+            }
         } catch (_: Exception) {
             "Tidak dapat membaca log proses."
         }
