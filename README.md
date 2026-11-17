@@ -4,7 +4,8 @@ Android ARM64 launcher project for organizing and testing legally owned Windows 
 
 ## Implemented
 
-- Import Windows EXE files and game data directories through Android's Storage Access Framework.
+- Import Windows EXE files through Android's Storage Access Framework.
+- Recursively copy selected game data directories into private per-game Wine workspaces with Windows-safe path handling, collision checks, and depth/entry/size limits.
 - Keep a local game library.
 - Build the Box64 Android ARM64 host engine from a pinned upstream source revision during GitHub Actions.
 - Package Box64 inside the APK native library directory.
@@ -12,10 +13,12 @@ Android ARM64 launcher project for organizing and testing legally owned Windows 
 - Validate ZIP paths, extracted size, hashes, ELF architecture, and PE architecture.
 - Create separate per-game workspaces and preserve Wine prefix state.
 - Initialize a Wine prefix through Box64 and Wine's wineboot executable.
-- Copy a selected Windows EXE into its per-game drive_c workspace.
+- Copy a selected Windows EXE into the same per-game working directory as imported game data.
 - Launch the selected EXE through the APK-packaged Box64 engine and supplied Wine binary with optional command-line arguments.
 - Track the launched process, record its log, and provide a stop action using wineserver.
-- Detect Vulkan devices through the native C++ bridge.
+- Detect Vulkan physical devices, graphics/compute queues, API/driver versions, and device-local heap size through the native C++ bridge.
+- Install validated x64 DXVK DLLs into an initialized Wine prefix and enable per-game native DLL overrides.
+- Configure a per-game DXVK state cache.
 - Build and verify an ARM64 debug APK through GitHub Actions.
 
 ## Runtime package
@@ -28,10 +31,15 @@ runtime ZIP contains x86_64 Wine, wineserver, wineboot.exe, and x64 DXVK DLLs. S
 
 ## Current limitations
 
-The launcher currently copies only the selected EXE, not its entire game installation
-directory or accompanying assets. Many games need additional files and will not work with
-only the EXE. DXVK has not yet been installed into the Wine prefix or connected to Vulkan.
-Audio and gamepad integration are also not implemented.
+Game data directories can now be copied recursively into the private game workspace.
+The selected EXE is staged into the same working directory, allowing programs that use
+relative paths to locate sibling assets and DLLs. The importer enforces 8 GiB total,
+4 GiB per file, 100,000 entries, and 48 levels. The source folder is not modified.
+
+DXVK installation and per-process Wine native DLL overrides are implemented. The
+Vulkan panel is only a device/queue capability probe; it does not prove that the device's
+driver is compatible with the selected DXVK build or that a Direct3D game will render.
+Audio and gamepad integration are not implemented.
 
 The launch screen can confirm that the Box64 process started, but only device testing with
 a compatible Wine package and actual game content can establish whether the game runs.

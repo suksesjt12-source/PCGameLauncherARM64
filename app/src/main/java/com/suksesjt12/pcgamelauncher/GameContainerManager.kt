@@ -95,4 +95,47 @@ object GameContainerManager {
         profile.profileFile.writeText(json.toString(2), Charsets.UTF_8)
     }
 
+    fun gameDataDirectory(profile: Profile): File {
+        val driveC = File(profile.directory, "drive_c").canonicalFile
+        val target = File(driveC, "PCGameLauncher/${profile.id}/game-data").canonicalFile
+        require(target.path.startsWith(driveC.path + File.separator)) {
+            "Direktori data game berada di luar drive_c."
+        }
+        return target
+    }
+
+    fun recordGameData(profile: Profile, directory: File, sourceUri: String, files: Int, directories: Int, bytes: Long) {
+        val target = directory.canonicalFile
+        val driveC = File(profile.directory, "drive_c").canonicalFile
+        require(target.path.startsWith(driveC.path + File.separator) && target.isDirectory) {
+            "Folder data game harus berada di dalam drive_c."
+        }
+        val json = JSONObject(profile.profileFile.readText(Charsets.UTF_8))
+        json.put("gameDataPath", target.absolutePath)
+            .put("gameDataUri", sourceUri)
+            .put("gameDataFiles", files)
+            .put("gameDataDirectories", directories)
+            .put("gameDataBytes", bytes)
+            .put("gameDataImportedAt", System.currentTimeMillis())
+        profile.profileFile.writeText(json.toString(2), Charsets.UTF_8)
+    }
+
+    fun hasGameData(profile: Profile): Boolean = gameDataDirectory(profile).isDirectory
+
+    fun isDxvkEnabled(profile: Profile): Boolean {
+        return try {
+            JSONObject(profile.profileFile.readText(Charsets.UTF_8)).optBoolean("dxvkEnabled", false)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun setDxvkState(profile: Profile, enabled: Boolean, runtimeVersion: String? = null) {
+        val json = JSONObject(profile.profileFile.readText(Charsets.UTF_8))
+        json.put("dxvkInstalled", true).put("dxvkEnabled", enabled)
+            .put("dxvkUpdatedAt", System.currentTimeMillis())
+        if (runtimeVersion != null) json.put("dxvkRuntimeVersion", runtimeVersion)
+        profile.profileFile.writeText(json.toString(2), Charsets.UTF_8)
+    }
+
 }

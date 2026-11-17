@@ -101,15 +101,22 @@ or that Wine can initialize.
 4. Press **Initialize Wine prefix** on the game card and wait for a successful result.
 5. Press **Launch EXE through Wine**. Optional command-line arguments are passed as
    individual process arguments; quoted values may contain spaces.
-6. The selected EXE is copied into the game's private `drive_c/PCGameLauncher/<id>`
-   directory and started through the APK-packaged Box64 engine and the supplied Wine binary.
-7. Use **STOP RUNNING GAME** to ask wineserver to stop the current prefix and terminate the
+6. On the game's card, choose **Import game folder** and select its complete installation
+   directory. Its contents are copied to
+   `drive_c/PCGameLauncher/<id>/game-data` with Windows-safe names and bounded recursion,
+   entry count, and expanded size.
+7. Choose **Install DXVK (Vulkan)** to copy the validated x64 `d3d11.dll` and `dxgi.dll`
+   into `drive_c/windows/system32`. The launcher enables
+   `WINEDLLOVERRIDES=d3d11,dxgi=n,b` for that game's process.
+8. Press **Launch EXE through Wine**. The selected EXE is staged in the same `game-data`
+   directory, which is also used as the process working directory.
+9. Use **STOP RUNNING GAME** to ask wineserver to stop the current prefix and terminate the
    launcher process.
 
-The current launch stage copies only the selected EXE file. It does not recursively import
-the rest of a game's installation directory, so games that need sibling DLLs, archives,
-asset files, or installers will not be complete yet. The launcher does not yet activate
-the imported DXVK DLLs or translate Direct3D calls to Vulkan.
+The native Vulkan panel reports physical devices and queue-family information. Device
+detection does not prove DXVK compatibility, successful Vulkan initialization by Wine,
+or a functioning Direct3D game. Testing with a compatible runtime and owned game data on
+physical hardware is still required.
 
 ## Scope and limitations
 
@@ -117,6 +124,8 @@ the imported DXVK DLLs or translate Direct3D calls to Vulkan.
 - Wine execution depends on the contents and build configuration of the supplied runtime ZIP.
 - Wine prefix initialization invokes `wineboot.exe` through Box64.
 - Game launch reports that the process started; it does not prove the game reached its main menu.
-- DXVK/Vulkan rendering integration, audio, and gamepad support remain separate work.
+- DXVK x64 DLL installation into Wine system32 and per-process native overrides are implemented. Actual DXVK/Vulkan rendering compatibility still requires device testing.
+- Vulkan device enumeration is not a DXVK rendering test or compatibility guarantee.
+- Audio and gamepad support remain separate work.
 - SHA-256 detects changes relative to the manifest; it does not authenticate the publisher.
 - This project is not an EXE-to-APK converter.

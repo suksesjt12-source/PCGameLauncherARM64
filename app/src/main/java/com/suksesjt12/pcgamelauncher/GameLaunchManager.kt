@@ -30,10 +30,7 @@ object GameLaunchManager {
         }
 
         val safeName = sanitizeExeName(displayName)
-        val gameDirectory = File(
-            File(profile.directory, "drive_c/PCGameLauncher"),
-            profile.id
-        )
+        val gameDirectory = GameContainerManager.gameDataDirectory(profile)
         if (!gameDirectory.exists() && !gameDirectory.mkdirs()) {
             error("Tidak dapat membuat direktori game.")
         }

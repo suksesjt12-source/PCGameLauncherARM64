@@ -22,6 +22,7 @@ class MainActivity : Activity() {
     private val prefs by lazy { getSharedPreferences("game_library", MODE_PRIVATE) }
     private val games = mutableListOf<GameEntry>()
     private var installedRuntime: RuntimePackageManager.RuntimeInfo? = null
+    private var pendingGameFolder: GameEntry? = null
 
     data class GameEntry(val name: String, val uri: String, val kind: String)
 
@@ -112,7 +113,7 @@ class MainActivity : Activity() {
         renderLibrary(list)
 
         val footer = TextView(this).apply {
-            text = "PCGameLauncherARM64 • v0.4.0\nDesigned for Android ARM64 devices. Game compatibility and performance are not guaranteed."
+            text = "PCGameLauncherARM64 • v0.5.0\nGame folder import + DXVK installer + Vulkan probe. Device testing is still required."
             textSize = 11f
             setTextColor(Color.rgb(120, 132, 153))
             gravity = Gravity.CENTER
@@ -151,6 +152,16 @@ class MainActivity : Activity() {
     }
 
     private fun chooseFolder() {
+        pendingGameFolder = null
+        openFolderPicker()
+    }
+
+    private fun chooseGameFolder(game: GameEntry) {
+        pendingGameFolder = game
+        openFolderPicker()
+    }
+
+    private fun openFolderPicker() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or
                 Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
@@ -172,8 +183,14 @@ class MainActivity : Activity() {
     @Deprecated("Platform document picker is used for broad Android compatibility")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (resultCode != RESULT_OK) return
-        val uri = data?.data ?: return
+        if (resultCode != RESULT_OK) {
+            if (requestCode == REQUEST_FOLDER) pendingGameFolder = null
+            return
+        }
+        val uri = data?.data ?: run {
+            if (requestCode == REQUEST_FOLDER) pendingGameFolder = null
+            return
+        }
 
         try {
             val flags = data.flags and
@@ -197,8 +214,14 @@ class MainActivity : Activity() {
                 addGame(GameEntry(name, uri.toString(), "Windows executable"))
             }
             REQUEST_FOLDER -> {
-                val name = queryDisplayName(uri) ?: "Game data folder"
-                addGame(GameEntry(name, uri.toString(), "Game data folder"))
+                val linkedGame = pendingGameFolder
+                pendingGameFolder = null
+                if (linkedGame != null) {
+                    importGameFolder(linkedGame, uri)
+                } else {
+                    val name = queryDisplayName(uri) ?: "Game data folder"
+                    addGame(GameEntry(name, uri.toString(), "Game data folder"))
+                }
             }
             REQUEST_RUNTIME -> importRuntimePackage(uri)
         }
@@ -240,6 +263,64 @@ class MainActivity : Activity() {
                 }
             }
         }.start()
+    }
+
+    private fun importGameFolder(game: GameEntry, treeUri: Uri) {
+        val profile = try {
+            GameContainerManager.create(this, game.name, game.uri)
+        } catch (error: Exception) {
+            showMessage("Workspace gagal dibuat", error.message ?: "Kesalahan direktori.")
+            return
+        }
+        if (!GameContainerManager.isPrefixInitialized(profile)) {
+            showMessage("Wine prefix belum siap", "Jalankan Initialize Wine prefix sebelum mengimpor folder game.")
+            return
+        }
+
+        val progress = ProgressDialog.show(
+            this, "Import game folder",
+            "Menyalin isi folder ke penyimpanan privat aplikasi. Jangan tutup aplikasi.",
+            true, false
+        )
+        Thread {
+            val result = try {
+                GameDataImportManager.importTree(contentResolver, treeUri, profile) to null as String?
+            } catch (error: Exception) {
+                null to (error.message ?: error.javaClass.simpleName)
+            }
+            runOnUiThread {
+                progress.dismiss()
+                val imported = result.first
+                if (imported == null) {
+                    showMessage("Folder game gagal diimpor", result.second ?: "Kesalahan impor tidak diketahui.")
+                    return@runOnUiThread
+                }
+                buildScreen()
+                showMessage(
+                    "Folder game berhasil diimpor",
+                    "File: ${imported.files}\nFolder: ${imported.directories}\nUkuran: ${imported.bytes / (1024L * 1024L)} MiB\n\nLokasi: ${imported.destination.absolutePath}\n\nEXE dari library ditempatkan di folder kerja yang sama saat diluncurkan."
+                )
+            }
+        }.start()
+    }
+
+    private fun installDxvk(game: GameEntry) {
+        val runtime = installedRuntime
+        if (runtime == null) {
+            showMessage("Runtime belum tersedia", "Impor paket Wine + DXVK schema v2 terlebih dahulu.")
+            return
+        }
+        val profile = try {
+            GameContainerManager.create(this, game.name, game.uri)
+        } catch (error: Exception) {
+            showMessage("Workspace gagal dibuat", error.message ?: "Kesalahan direktori.")
+            return
+        }
+        if (!GameContainerManager.isPrefixInitialized(profile)) {
+            showMessage("Wine prefix belum siap", "Jalankan Initialize Wine prefix dahulu.")
+            return
+        }
+        runRuntimeTask("Install DXVK") { DxvkInstaller.install(runtime, profile) }
     }
 
     private fun probeRuntime() {
@@ -363,7 +444,7 @@ class MainActivity : Activity() {
         val progress = ProgressDialog.show(
             this,
             "Preparing game",
-            "Menyalin EXE ke workspace privat dan memulai Box64/Wine.",
+            "Menyalin EXE ke folder kerja game privat dan memulai Box64/Wine.",
             true,
             false
         )
@@ -634,6 +715,27 @@ class MainActivity : Activity() {
                     setOnClickListener { initializeWinePrefix(game) }
                 }
                 card.addView(initializeButton)
+
+                val folderButton = Button(this).apply {
+                    text = try {
+                        val profile = GameContainerManager.create(this@MainActivity, game.name, game.uri)
+                        if (GameContainerManager.hasGameData(profile)) "Replace imported game folder" else "Import game folder"
+                    } catch (_: Exception) { "Import game folder" }
+                    isAllCaps = false
+                    setOnClickListener { chooseGameFolder(game) }
+                }
+                card.addView(folderButton)
+
+                val dxvkButton = Button(this).apply {
+                    val enabled = try {
+                        val profile = GameContainerManager.create(this@MainActivity, game.name, game.uri)
+                        GameContainerManager.isDxvkEnabled(profile)
+                    } catch (_: Exception) { false }
+                    text = if (enabled) "Reinstall / update DXVK" else "Install DXVK (Vulkan)"
+                    isAllCaps = false
+                    setOnClickListener { installDxvk(game) }
+                }
+                card.addView(dxvkButton)
 
                 val launchButton = Button(this).apply {
                     text = "Launch EXE through Wine"
