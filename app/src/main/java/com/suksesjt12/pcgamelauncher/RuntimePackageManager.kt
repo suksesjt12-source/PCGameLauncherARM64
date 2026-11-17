@@ -20,6 +20,7 @@ object RuntimePackageManager {
         val name: String,
         val version: String,
         val hostAbi: String,
+        val supportsX86: Boolean,
         val root: File,
         val wine64: File,
         val wineserver: File,
@@ -263,6 +264,7 @@ object RuntimePackageManager {
             name = name,
             version = version,
             hostAbi = hostAbi,
+            supportsX86 = manifest.optBoolean("supportsX86", false),
             root = root,
             wine64 = wine64,
             wineserver = wineserver,
@@ -309,31 +311,44 @@ object RuntimePackageManager {
         return isElf && is64BitLittleEndian && elfType in 2..3 && machine == expectedMachine
     }
 
-    private fun isPe64X64(file: File): Boolean {
+    fun inspectWindowsExecutable(file: File): String? {
+        val pe = readPeArchitecture(file) ?: return null
+        return when {
+            pe.first == 0x8664 && pe.second == 0x20b -> "x86_64"
+            pe.first == 0x014c && pe.second == 0x010b -> "x86"
+            else -> null
+        }
+    }
+
+    private fun isPe64X64(file: File): Boolean =
+        inspectWindowsExecutable(file) == "x86_64"
+
+    private fun readPeArchitecture(file: File): Pair<Int, Int>? {
         return try {
             RandomAccessFile(file, "r").use { input ->
-                if (input.length() < 0x40) return false
-                if (input.readUnsignedByte() != 'M'.code || input.readUnsignedByte() != 'Z'.code) {
-                    return false
-                }
+                if (input.length() < 0x40) return null
+                if (input.readUnsignedByte() != 'M'.code ||
+                    input.readUnsignedByte() != 'Z'.code
+                ) return null
+
                 input.seek(0x3c)
                 val offset = readIntLe(input).toLong()
-                if (offset < 0x40 || offset + 26 > input.length()) return false
+                if (offset < 0x40 || offset + 26 > input.length()) return null
 
                 input.seek(offset)
                 if (input.readUnsignedByte() != 'P'.code ||
                     input.readUnsignedByte() != 'E'.code ||
                     input.readUnsignedByte() != 0 ||
                     input.readUnsignedByte() != 0
-                ) return false
+                ) return null
 
                 val machine = readUShortLe(input)
                 input.seek(offset + 24)
                 val optionalMagic = readUShortLe(input)
-                machine == 0x8664 && optionalMagic == 0x20b
+                machine to optionalMagic
             }
         } catch (_: Exception) {
-            false
+            null
         }
     }
 
