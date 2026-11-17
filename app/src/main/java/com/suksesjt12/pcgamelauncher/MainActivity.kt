@@ -96,7 +96,7 @@ class MainActivity : Activity() {
         renderLibrary(list)
 
         val footer = TextView(this).apply {
-            text = "PCGameLauncherARM64 • v0.2.0\nDesigned for Android ARM64 devices. Game compatibility and performance are not guaranteed."
+            text = "PCGameLauncherARM64 • v0.3.0\nDesigned for Android ARM64 devices. Game compatibility and performance are not guaranteed."
             textSize = 11f
             setTextColor(Color.rgb(120, 132, 153))
             gravity = Gravity.CENTER
@@ -289,13 +289,13 @@ class MainActivity : Activity() {
                 progress.dismiss()
                 val summary = buildString {
                     append(if (result.success) "SUCCESS" else "FAILED")
-                    append("\\nStage: ")
+                    append("\nStage: ")
                     append(result.stage)
                     result.exitCode?.let {
-                        append("\\nExit code: ")
+                        append("\nExit code: ")
                         append(it)
                     }
-                    append("\\n\\n")
+                    append("\n\n")
                     append(result.output)
                 }
                 AlertDialog.Builder(this)
