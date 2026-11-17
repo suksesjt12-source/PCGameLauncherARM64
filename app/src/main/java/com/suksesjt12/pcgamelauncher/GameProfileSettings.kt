@@ -33,19 +33,19 @@ object GameProfileSettings {
             val graphics = root.optJSONObject("graphicsSettings") ?: JSONObject()
             val audio = root.optJSONObject("audioSettings") ?: JSONObject()
             val controls = root.optJSONObject("controllerSettings") ?: JSONObject()
-            validate(
-                Settings(
-                    resolution = graphics.optString("resolution", "960x540"),
-                    frameLimit = graphics.optInt("frameLimit", 0),
-                    vsync = graphics.optBoolean("vsync", true),
-                    dxvkHud = graphics.optString("dxvkHud", "off"),
-                    audioMode = audio.optString("mode", "default"),
-                    pulseLatencyMs = audio.optInt("pulseLatencyMs", 60),
-                    controllerLayout = controls.optString("layout", "classic"),
-                    controllerOpacity = controls.optInt("opacity", 65),
-                    controllerScale = controls.optInt("scale", 100)
-                )
+            val settings = Settings(
+                resolution = graphics.optString("resolution", "960x540"),
+                frameLimit = graphics.optInt("frameLimit", 0),
+                vsync = graphics.optBoolean("vsync", true),
+                dxvkHud = graphics.optString("dxvkHud", "off"),
+                audioMode = audio.optString("mode", "default"),
+                pulseLatencyMs = audio.optInt("pulseLatencyMs", 60),
+                controllerLayout = controls.optString("layout", "classic"),
+                controllerOpacity = controls.optInt("opacity", 65),
+                controllerScale = controls.optInt("scale", 100)
             )
+            validate(settings)
+            settings
         } catch (_: Exception) {
             Settings()
         }
