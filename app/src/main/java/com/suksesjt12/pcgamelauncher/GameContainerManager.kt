@@ -41,17 +41,27 @@ object GameContainerManager {
         }
 
         val profileFile = File(directory, "profile.json")
-        val profile = JSONObject()
-            .put("schemaVersion", 1)
+        val profile = try {
+            if (profileFile.isFile) JSONObject(profileFile.readText(Charsets.UTF_8))
+            else JSONObject()
+        } catch (_: Exception) {
+            JSONObject()
+        }
+
+        profile.put("schemaVersion", 1)
             .put("containerId", id)
             .put("gameName", gameName)
             .put("gameUri", gameUri)
             .put("architecture", "win64")
-            .put("box64Preset", "compatibility")
-            .put("graphicsBackend", "auto")
-            .put("resolution", "960x540")
-            .put("createdAt", System.currentTimeMillis())
-            .put("state", "workspace_only_not_a_wine_prefix")
+            .put("box64Preset", profile.optString("box64Preset", "compatibility"))
+            .put("graphicsBackend", profile.optString("graphicsBackend", "auto"))
+            .put("resolution", profile.optString("resolution", "960x540"))
+        if (!profile.has("createdAt")) {
+            profile.put("createdAt", System.currentTimeMillis())
+        }
+        if (!profile.has("state")) {
+            profile.put("state", "workspace_only_not_a_wine_prefix")
+        }
 
         profileFile.writeText(profile.toString(2), Charsets.UTF_8)
         return Profile(id, directory, profileFile)
@@ -61,6 +71,27 @@ object GameContainerManager {
         val json = JSONObject(profile.profileFile.readText(Charsets.UTF_8))
         json.put("state", state)
         json.put("lastUpdatedAt", System.currentTimeMillis())
+        profile.profileFile.writeText(json.toString(2), Charsets.UTF_8)
+    }
+
+    fun isPrefixInitialized(profile: Profile): Boolean {
+        return try {
+            JSONObject(profile.profileFile.readText(Charsets.UTF_8))
+                .optString("state") == "wine_prefix_initialized"
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun recordExecutable(profile: Profile, executable: File) {
+        val json = JSONObject(profile.profileFile.readText(Charsets.UTF_8))
+        val prefixRoot = profile.directory.canonicalFile
+        val target = executable.canonicalFile
+        require(target.path.startsWith(prefixRoot.path + File.separator)) {
+            "Executable harus berada di dalam workspace game."
+        }
+        json.put("executablePath", target.absolutePath)
+            .put("lastPreparedAt", System.currentTimeMillis())
         profile.profileFile.writeText(json.toString(2), Charsets.UTF_8)
     }
 
