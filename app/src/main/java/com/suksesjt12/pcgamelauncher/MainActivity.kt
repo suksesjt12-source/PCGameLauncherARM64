@@ -404,7 +404,7 @@ class MainActivity : Activity() {
                 }
 
                 val details =
-                    "Box64 process PID: ${launch.pid}\n" +
+                    "Launch session: ${launch.sessionId}\n" +
                     "Executable: ${prepared.executable.absolutePath}\n" +
                     "Guest architecture: ${prepared.architecture}\n" +
                     "Log: ${launch.logFile?.absolutePath}\n\n" +
