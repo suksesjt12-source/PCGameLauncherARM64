@@ -310,32 +310,16 @@ class MainActivity : Activity() {
     private fun parseArguments(raw: String): List<String> {
         val result = mutableListOf<String>()
         val token = StringBuilder()
-        var quote: Char? = null
-        var escaping = false
+        var quoted = false
         var tokenStarted = false
 
         for (character in raw) {
-            if (escaping) {
-                token.append(character)
-                escaping = false
-                tokenStarted = true
-                continue
-            }
-            if (quote != null) {
-                when {
-                    character == quote -> quote = null
-                    character == '\\\\' -> escaping = true
-                    else -> token.append(character)
-                }
-                tokenStarted = true
-                continue
-            }
             when {
-                character == '"' || character == '\\'' -> {
-                    quote = character
+                character == '"' -> {
+                    quoted = !quoted
                     tokenStarted = true
                 }
-                character.isWhitespace() -> {
+                character.isWhitespace() && !quoted -> {
                     if (tokenStarted) {
                         result.add(token.toString())
                         token.setLength(0)
@@ -349,10 +333,11 @@ class MainActivity : Activity() {
             }
         }
 
-        if (escaping) token.append('\\\\')
-        if (quote != null) error("Tanda kutip argumen belum ditutup.")
+        if (quoted) error("Tanda kutip ganda argumen belum ditutup.")
         if (tokenStarted) result.add(token.toString())
-        if (result.size > 128 || result.any { it.length > 8192 }) {
+        if (result.size > 128 || result.any { it.length > 8192 } ||
+            result.sumOf { it.length } > 32768
+        ) {
             error("Argumen peluncuran terlalu panjang.")
         }
         return result
