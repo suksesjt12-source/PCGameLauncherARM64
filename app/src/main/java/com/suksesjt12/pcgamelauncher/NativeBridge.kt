@@ -9,6 +9,11 @@ object NativeBridge {
     }
 
     external fun runtimeStatus(): String
+    external fun deviceInfo(): String
 
-    fun status(): String = if (loaded) runtimeStatus() else "Native status bridge unavailable"
+    fun status(): String =
+        if (loaded) runtimeStatus() else "Native status bridge unavailable"
+
+    fun device(): String =
+        if (loaded) deviceInfo() else "GPU probe unavailable: native bridge not loaded"
 }
