@@ -224,7 +224,7 @@ class MainActivity : Activity() {
                         .setTitle("Runtime package imported")
                         .setMessage(
                             "${info.name} ${info.version} passed the package checks.\n\n" +
-                                "Use TEST BOX64 + WINE to check basic runtime startup. A game still needs an initialized Wine prefix."
+                                "Use TEST BOX64 + WINE first, then initialize a Wine prefix for each game before launching it."
                         )
                         .setPositiveButton("OK", null)
                         .show()
