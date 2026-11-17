@@ -129,3 +129,24 @@ physical hardware is still required.
 - Audio and gamepad support remain separate work.
 - SHA-256 detects changes relative to the manifest; it does not authenticate the publisher.
 - This project is not an EXE-to-APK converter.
+
+
+## Per-game graphics, audio and monitoring (launcher v0.6.0)
+
+Per-game settings are stored under `graphicsSettings`, `audioSettings`, and
+`controllerSettings` in each container's `profile.json`. When DXVK is installed, the
+launcher writes a per-container `pcgl-config/dxvk.conf` with `dxgi.syncInterval` and
+`dxvk.maxFrameRate`, then passes `DXVK_CONFIG_FILE` and the selected `DXVK_HUD` to
+the game process. The HUD can report FPS and frame times within the game, but only if
+DXVK/Vulkan rendering is actually active.
+
+The resolution choice is a saved preference only; no Wine window/display surface exists
+yet to force a game resolution. The PulseAudio option passes `PULSE_LATENCY_MSEC`; it
+does not install or start PulseAudio, and requires a compatible runtime and reachable
+audio service.
+
+The device monitor reads Android battery temperature and percentage, system thermal
+status, available system RAM, and the launcher's own process PSS. It does not measure
+the Box64 child process's memory or SoC junction temperature. The controller page stores
+layout/scale/opacity preferences and includes a button-response preview. It does not
+forward touch/controller events into Wine; that requires a dedicated Wine/SDL input bridge.

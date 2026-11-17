@@ -91,6 +91,15 @@ object RuntimeExecutionManager {
         }
 
         val logFile = File(logs, "game-last-run.log")
+        val gameSettings = GameProfileSettings.load(profile)
+        val dxvkEnabled = GameContainerManager.isDxvkEnabled(profile)
+        val dxvkConfig = if (dxvkEnabled) {
+            try {
+                GameProfileSettings.writeDxvkConfig(profile, gameSettings)
+            } catch (error: Exception) {
+                return LaunchResult(false, null, null, "Tidak dapat menulis konfigurasi DXVK: ${error.message}")
+            }
+        } else null
         val command = ArrayList<String>()
         command.add(engine.absolutePath)
         command.add(runtime.wine64.absolutePath)
@@ -110,13 +119,26 @@ object RuntimeExecutionManager {
                 put("WINEDEBUG", "-all")
                 put("BOX64_NOBANNER", "1")
                 put("PATH", runtime.wine64.parentFile.absolutePath + File.pathSeparator + (get("PATH") ?: ""))
-                if (GameContainerManager.isDxvkEnabled(profile)) {
+                if (dxvkEnabled && dxvkConfig != null) {
                     val dxvkCache = File(prefixRoot, "shader-cache/dxvk")
                     if (!dxvkCache.exists()) dxvkCache.mkdirs()
                     put("WINEDLLOVERRIDES", "d3d11,dxgi=n,b")
                     put("DXVK_LOG_LEVEL", "none")
                     put("DXVK_STATE_CACHE", "1")
                     put("DXVK_STATE_CACHE_PATH", dxvkCache.absolutePath)
+                    put("DXVK_CONFIG_FILE", dxvkConfig.absolutePath)
+                    GameProfileSettings.dxvkHudValue(gameSettings)?.let {
+                        put("DXVK_HUD", it)
+                    } ?: remove("DXVK_HUD")
+                } else {
+                    remove("DXVK_CONFIG_FILE")
+                    remove("DXVK_HUD")
+                }
+                if (gameSettings.audioMode == "pulseaudio") {
+                    // This is a PulseAudio client hint; it does not install or start a server.
+                    put("PULSE_LATENCY_MSEC", gameSettings.pulseLatencyMs.toString())
+                } else {
+                    remove("PULSE_LATENCY_MSEC")
                 }
                 if (runtime.libraryPaths.isNotEmpty()) {
                     put(

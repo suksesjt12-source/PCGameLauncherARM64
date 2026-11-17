@@ -7,11 +7,17 @@ import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
+import android.widget.Spinner
+import android.widget.Switch
 import android.widget.TextView
 import android.text.InputType
 import android.widget.Toast
@@ -23,6 +29,14 @@ class MainActivity : Activity() {
     private val games = mutableListOf<GameEntry>()
     private var installedRuntime: RuntimePackageManager.RuntimeInfo? = null
     private var pendingGameFolder: GameEntry? = null
+    private var performancePanel: TextView? = null
+    private val performanceHandler = Handler(Looper.getMainLooper())
+    private val performanceRefresh = object : Runnable {
+        override fun run() {
+            performancePanel?.text = PerformanceMonitor.snapshot(this@MainActivity).toDisplayText()
+            performanceHandler.postDelayed(this, 3_000L)
+        }
+    }
 
     data class GameEntry(val name: String, val uri: String, val kind: String)
 
@@ -33,6 +47,17 @@ class MainActivity : Activity() {
         loadLibrary()
         installedRuntime = RuntimePackageManager.findInstalled(filesDir)
         buildScreen()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        performanceHandler.removeCallbacks(performanceRefresh)
+        performanceRefresh.run()
+    }
+
+    override fun onPause() {
+        performanceHandler.removeCallbacks(performanceRefresh)
+        super.onPause()
     }
 
     private fun buildScreen() {
@@ -80,6 +105,23 @@ class MainActivity : Activity() {
         }
         content.addView(runtimeCard, matchWidth())
 
+        val performanceTitle = TextView(this).apply {
+            text = "DEVICE PERFORMANCE MONITOR"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setPadding(0, dp(18), 0, dp(8))
+        }
+        content.addView(performanceTitle)
+        performancePanel = TextView(this).apply {
+            text = PerformanceMonitor.snapshot(this@MainActivity).toDisplayText()
+            textSize = 12f
+            setTextColor(Color.rgb(190, 205, 224))
+            setBackgroundColor(Color.rgb(24, 29, 41))
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+        }
+        content.addView(performancePanel, matchWidth())
+
         content.addView(actionButton("IMPORT WINDOWS EXE") { chooseExe() }, buttonParams())
         content.addView(actionButton("ADD GAME DATA FOLDER") { chooseFolder() }, buttonParams())
         content.addView(actionButton("IMPORT WINE + DXVK RUNTIME (.ZIP)") { chooseRuntimePackage() }, buttonParams())
@@ -113,7 +155,7 @@ class MainActivity : Activity() {
         renderLibrary(list)
 
         val footer = TextView(this).apply {
-            text = "PCGameLauncherARM64 • v0.5.0\nGame folder import + DXVK installer + Vulkan probe. Device testing is still required."
+            text = "PCGameLauncherARM64 • v0.6.0\nPer-game DXVK settings, audio hints, thermal monitor and controller layout preview."
             textSize = 11f
             setTextColor(Color.rgb(120, 132, 153))
             gravity = Gravity.CENTER
@@ -321,6 +363,271 @@ class MainActivity : Activity() {
             return
         }
         runRuntimeTask("Install DXVK") { DxvkInstaller.install(runtime, profile) }
+    }
+
+    private fun showGameSettings(game: GameEntry) {
+        val profile = try {
+            GameContainerManager.create(this, game.name, game.uri)
+        } catch (error: Exception) {
+            showMessage("Workspace gagal dibuat", error.message ?: "Kesalahan direktori.")
+            return
+        }
+        val current = GameProfileSettings.load(profile)
+        val scroll = ScrollView(this)
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+        }
+        scroll.addView(form)
+
+        val resolutionValues = listOf("640x480", "800x600", "960x540", "1280x720")
+        val resolutionLabels = listOf("640 × 480", "800 × 600", "960 × 540", "1280 × 720")
+        val fpsValues = listOf(0, 30, 45, 60)
+        val fpsLabels = listOf("Uncapped", "30 FPS", "45 FPS", "60 FPS")
+        val hudValues = listOf("off", "fps", "fps,frametimes", "fps,frametimes,devinfo")
+        val hudLabels = listOf("Off", "FPS", "FPS + frametimes", "FPS + GPU info")
+        val audioValues = listOf("default", "pulseaudio")
+        val audioLabels = listOf("System default", "PulseAudio latency hint")
+        val latencyValues = listOf(40, 60, 100, 150)
+        val latencyLabels = latencyValues.map { "$it ms" }
+        val layoutValues = listOf("classic", "compact")
+        val layoutLabels = listOf("Classic", "Compact")
+
+        fun addSpinner(label: String, options: List<String>, selected: Int): Spinner {
+            val title = TextView(this).apply {
+                text = label
+                textSize = 13f
+                setTextColor(Color.rgb(205, 215, 230))
+                setPadding(0, dp(10), 0, dp(2))
+            }
+            form.addView(title)
+            val spinner = Spinner(this)
+            val adapter = ArrayAdapter(
+                this,
+                android.R.layout.simple_spinner_item,
+                options
+            ).also {
+                it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            spinner.adapter = adapter
+            spinner.setSelection(selected.coerceIn(options.indices))
+            form.addView(spinner, matchWidth())
+            return spinner
+        }
+
+        val heading = TextView(this).apply {
+            text = "GRAPHICS"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setPadding(0, dp(8), 0, dp(4))
+        }
+        form.addView(heading)
+        val resolutionSpinner = addSpinner(
+            "Preferred resolution (saved as profile preference)",
+            resolutionLabels,
+            resolutionValues.indexOf(current.resolution)
+        )
+        val fpsSpinner = addSpinner(
+            "DXVK frame limiter",
+            fpsLabels,
+            fpsValues.indexOf(current.frameLimit)
+        )
+        val vsyncSwitch = Switch(this).apply {
+            text = "VSync (DXVK)"
+            setTextColor(Color.WHITE)
+            isChecked = current.vsync
+            setPadding(0, dp(10), 0, dp(6))
+        }
+        form.addView(vsyncSwitch)
+        val hudSpinner = addSpinner(
+            "DXVK in-game HUD",
+            hudLabels,
+            hudValues.indexOf(current.dxvkHud)
+        )
+        val resolutionNote = TextView(this).apply {
+            text = "Resolution is currently stored as a preference only. The launcher does not yet provide a Wine display/window surface to force the game's actual resolution. FPS cap, VSync and HUD settings are applied only when DXVK is installed and active."
+            textSize = 11f
+            setTextColor(Color.rgb(155, 166, 187))
+            setPadding(0, dp(6), 0, dp(12))
+        }
+        form.addView(resolutionNote)
+
+        val audioHeading = TextView(this).apply {
+            text = "AUDIO"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setPadding(0, dp(8), 0, dp(4))
+        }
+        form.addView(audioHeading)
+        val audioSpinner = addSpinner(
+            "Audio environment",
+            audioLabels,
+            audioValues.indexOf(current.audioMode)
+        )
+        val latencySpinner = addSpinner(
+            "PulseAudio latency hint",
+            latencyLabels,
+            latencyValues.indexOf(current.pulseLatencyMs)
+        )
+        form.addView(TextView(this).apply {
+            text = "PulseAudio option only passes PULSE_LATENCY_MSEC to the process. It does not install or start an audio server, and it requires a compatible Wine runtime and accessible PulseAudio service."
+            textSize = 11f
+            setTextColor(Color.rgb(155, 166, 187))
+            setPadding(0, dp(6), 0, dp(12))
+        })
+
+        val controlHeading = TextView(this).apply {
+            text = "VIRTUAL CONTROLLER PROFILE"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setPadding(0, dp(8), 0, dp(4))
+        }
+        form.addView(controlHeading)
+        val layoutSpinner = addSpinner(
+            "Layout preset",
+            layoutLabels,
+            layoutValues.indexOf(current.controllerLayout)
+        )
+
+        val scaleLabel = TextView(this).apply {
+            text = "Controller scale: ${current.controllerScale}%"
+            textSize = 12f
+            setTextColor(Color.rgb(205, 215, 230))
+            setPadding(0, dp(10), 0, dp(2))
+        }
+        form.addView(scaleLabel)
+        val scaleSeek = SeekBar(this).apply {
+            max = 50
+            progress = current.controllerScale - 75
+        }
+        scaleSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                scaleLabel.text = "Controller scale: ${progress + 75}%"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+        })
+        form.addView(scaleSeek)
+
+        val opacityLabel = TextView(this).apply {
+            text = "Controller opacity: ${current.controllerOpacity}%"
+            textSize = 12f
+            setTextColor(Color.rgb(205, 215, 230))
+            setPadding(0, dp(10), 0, dp(2))
+        }
+        form.addView(opacityLabel)
+        val opacitySeek = SeekBar(this).apply {
+            max = 70
+            progress = current.controllerOpacity - 30
+        }
+        opacitySeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                opacityLabel.text = "Controller opacity: ${progress + 30}%"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+        })
+        form.addView(opacitySeek)
+
+        val previewTitle = TextView(this).apply {
+            text = "LAYOUT PREVIEW"
+            textSize = 12f
+            setTextColor(Color.rgb(205, 215, 230))
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setPadding(0, dp(12), 0, dp(4))
+        }
+        form.addView(previewTitle)
+        val previewStatus = TextView(this).apply {
+            text = "Tap a preview button to test the layout."
+            textSize = 11f
+            setTextColor(Color.rgb(155, 166, 187))
+        }
+        val previewRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, dp(6), 0, dp(6))
+        }
+        val dpad = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+        }
+        val dpadMiddle = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        fun previewButton(label: String): Button =
+            Button(this).apply {
+                text = label
+                isAllCaps = false
+                textSize = 11f
+                minWidth = dp(44)
+                setOnClickListener {
+                    previewStatus.text = "Preview input: $label (not sent to the game)"
+                }
+            }
+        dpad.addView(previewButton("UP"), LinearLayout.LayoutParams(dp(52), dp(42)))
+        dpadMiddle.addView(previewButton("LEFT"), LinearLayout.LayoutParams(dp(58), dp(42)))
+        dpadMiddle.addView(previewButton("DOWN"), LinearLayout.LayoutParams(dp(58), dp(42)))
+        dpadMiddle.addView(previewButton("RIGHT"), LinearLayout.LayoutParams(dp(58), dp(42)))
+        dpad.addView(dpadMiddle)
+        val faceButtons = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+        }
+        val faceTop = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val faceBottom = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        faceTop.addView(previewButton("Y"), LinearLayout.LayoutParams(dp(48), dp(44)))
+        faceTop.addView(previewButton("X"), LinearLayout.LayoutParams(dp(48), dp(44)))
+        faceBottom.addView(previewButton("B"), LinearLayout.LayoutParams(dp(48), dp(44)))
+        faceBottom.addView(previewButton("A"), LinearLayout.LayoutParams(dp(48), dp(44)))
+        faceButtons.addView(faceTop)
+        faceButtons.addView(faceBottom)
+        previewRow.addView(dpad, LinearLayout.LayoutParams(0, -2, 1f))
+        previewRow.addView(faceButtons, LinearLayout.LayoutParams(0, -2, 1f))
+        form.addView(previewRow)
+        form.addView(previewStatus)
+        form.addView(TextView(this).apply {
+            text = "This is a layout and button-response preview only. Touch/controller events are not yet forwarded into Wine; that requires a connected Wine/SDL input bridge."
+            textSize = 11f
+            setTextColor(Color.rgb(210, 180, 130))
+            setPadding(0, dp(6), 0, dp(12))
+        })
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Settings • ${game.name}")
+            .setView(scroll)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                try {
+                    val settings = GameProfileSettings.Settings(
+                        resolution = resolutionValues[resolutionSpinner.selectedItemPosition],
+                        frameLimit = fpsValues[fpsSpinner.selectedItemPosition],
+                        vsync = vsyncSwitch.isChecked,
+                        dxvkHud = hudValues[hudSpinner.selectedItemPosition],
+                        audioMode = audioValues[audioSpinner.selectedItemPosition],
+                        pulseLatencyMs = latencyValues[latencySpinner.selectedItemPosition],
+                        controllerLayout = layoutValues[layoutSpinner.selectedItemPosition],
+                        controllerOpacity = opacitySeek.progress + 30,
+                        controllerScale = scaleSeek.progress + 75
+                    )
+                    GameProfileSettings.save(profile, settings)
+                    dialog.dismiss()
+                    showMessage(
+                        "Settings saved",
+                        "Game profile: ${game.name}\nResolution preference: ${settings.resolution}\nDXVK FPS cap: ${if (settings.frameLimit == 0) "Uncapped" else settings.frameLimit}\nVSync: ${if (settings.vsync) "On" else "Off"}\nAudio: ${settings.audioMode}\nController layout: ${settings.controllerLayout}\n\nDXVK options apply only when DXVK is installed. Controller controls remain preview-only until the input bridge is implemented."
+                    )
+                } catch (error: Exception) {
+                    showMessage("Settings gagal disimpan", error.message ?: "Kesalahan konfigurasi.")
+                }
+            }
+        }
+        dialog.show()
     }
 
     private fun probeRuntime() {
@@ -736,6 +1043,13 @@ class MainActivity : Activity() {
                     setOnClickListener { installDxvk(game) }
                 }
                 card.addView(dxvkButton)
+
+                val settingsButton = Button(this).apply {
+                    text = "Game settings + controller preview"
+                    isAllCaps = false
+                    setOnClickListener { showGameSettings(game) }
+                }
+                card.addView(settingsButton)
 
                 val launchButton = Button(this).apply {
                     text = "Launch EXE through Wine"
