@@ -32,8 +32,8 @@ wine-runtime.zip
         └── dxgi.dll
 ```
 
-The paths above are an example layout. A package may use other relative paths, provided
-the manifest points to the actual files and library directories.
+The paths are an example layout. A package may use other relative paths, provided the
+manifest points to the actual files and library directories.
 
 ## Manifest
 
@@ -47,6 +47,7 @@ SHA-256 digest of each listed file. They are not valid package checksums.
   "name": "Community Wine x86_64",
   "version": "1.0.0",
   "hostAbi": "arm64-v8a",
+  "supportsX86": false,
   "components": {
     "wine64": "wine/bin/wine64",
     "wineserver": "wine/bin/wineserver",
@@ -68,30 +69,54 @@ SHA-256 digest of each listed file. They are not valid package checksums.
 }
 ```
 
+Set `supportsX86` to true only when the supplied Wine build has been confirmed to support
+32-bit x86 Windows applications through its WOW64 configuration. The default is false.
+
 ## Architecture checks
 
-- Box64 is built for Android ARM64 (AArch64) and embedded into the APK by the GitHub Actions workflow.
+- Box64 is built for Android ARM64 (AArch64) and embedded into the APK by GitHub Actions.
 - `wine64` and `wineserver` must be 64-bit little-endian Linux ELF files with machine type x86-64.
 - `wineboot.exe`, `d3d11.dll`, and `dxgi.dll` must be PE32+ x86-64 files.
 - Each component listed in `components` must have a matching SHA-256 entry.
-- `libraryPaths` is optional. When present, each relative path must exist as a directory and is passed to Box64 as `BOX64_LD_LIBRARY_PATH`.
+- `libraryPaths` is optional. Each declared relative path must exist as a directory.
+- Game EXEs selected by the launcher are checked as PE32+ x86-64 or PE32 x86.
+- PE32 x86 games are accepted only when `supportsX86` is true.
 
 ## Android execution model
 
-Android 10 and newer restrict regular apps from executing binary files located in their
-writable app home directory. This project therefore packages the ARM64 Box64 host engine
-as a native APK library and enables native-library extraction. Wine's x86_64 ELF files and
-Windows PE files remain data loaded by Box64/Wine, not direct Android process executables.
+Android 10 and newer restrict regular apps from executing binary files in their writable
+app home directory. This project packages the ARM64 Box64 host engine as a native APK
+library and enables native-library extraction. Wine's x86_64 ELF files and Windows PE
+files remain guest data loaded by Box64/Wine, not direct Android process executables.
 
 This packaging model still requires device testing. A successful APK build does not prove
 that Box64 can start on every Android vendor build, that all Wine libraries are present,
-or that Wine/DXVK can initialize.
+or that Wine can initialize.
+
+## Game launch workflow
+
+1. Import the game EXE in the library.
+2. Import a compatible Wine runtime ZIP.
+3. Use **TEST BOX64 + WINE** to run the Wine version probe.
+4. Press **Initialize Wine prefix** on the game card and wait for a successful result.
+5. Press **Launch EXE through Wine**. Optional command-line arguments are passed as
+   individual process arguments; quoted values may contain spaces.
+6. The selected EXE is copied into the game's private `drive_c/PCGameLauncher/<id>`
+   directory and started through the APK-packaged Box64 engine and the supplied Wine binary.
+7. Use **STOP RUNNING GAME** to ask wineserver to stop the current prefix and terminate the
+   launcher process.
+
+The current launch stage copies only the selected EXE file. It does not recursively import
+the rest of a game's installation directory, so games that need sibling DLLs, archives,
+asset files, or installers will not be complete yet. The launcher does not yet activate
+the imported DXVK DLLs or translate Direct3D calls to Vulkan.
 
 ## Scope and limitations
 
-- The runtime importer checks structure, hashes, file formats, and processor architecture. It does not prove that a Wine build is compatible with the Android host.
-- The runtime probe attempts to start Box64 with the supplied Wine binary and request its version.
-- Prefix initialization invokes the supplied Wine `wineboot.exe` through Box64 and stores its output in the container log directory.
-- DXVK files are validated as PE32+ x86-64. Vulkan translation, driver compatibility, audio, and gamepad support remain separate integration work.
-- A matching SHA-256 detects changes relative to the manifest; it does not authenticate the package publisher. Use only files you trust and have permission to use.
-- This project is not an EXE-to-APK converter. Running a Windows executable requires the complete compatible runtime, game data, and graphics/audio/input integration.
+- Runtime import checks structure, hashes, file formats, and architecture, not runtime compatibility.
+- Wine execution depends on the contents and build configuration of the supplied runtime ZIP.
+- Wine prefix initialization invokes `wineboot.exe` through Box64.
+- Game launch reports that the process started; it does not prove the game reached its main menu.
+- DXVK/Vulkan rendering integration, audio, and gamepad support remain separate work.
+- SHA-256 detects changes relative to the manifest; it does not authenticate the publisher.
+- This project is not an EXE-to-APK converter.
