@@ -23,7 +23,7 @@ object RuntimeExecutionManager {
 
     data class LaunchResult(
         val success: Boolean,
-        val pid: Int?,
+        val sessionId: String?,
         val logFile: File?,
         val message: String
     )
@@ -143,7 +143,7 @@ object RuntimeExecutionManager {
 
             LaunchResult(
                 true,
-                process.pid().toInt(),
+                System.currentTimeMillis().toString(),
                 logFile,
                 "Box64 process berhasil dimulai. Ini belum menjamin game berhasil masuk ke menu."
             )
