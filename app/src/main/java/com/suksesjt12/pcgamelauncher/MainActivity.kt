@@ -2,6 +2,7 @@ package com.suksesjt12.pcgamelauncher
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.ProgressDialog
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
@@ -11,12 +12,14 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import org.json.JSONArray
 import org.json.JSONObject
 
 class MainActivity : Activity() {
     private val prefs by lazy { getSharedPreferences("game_library", MODE_PRIVATE) }
     private val games = mutableListOf<GameEntry>()
+    private var installedRuntime: RuntimePackageManager.RuntimeInfo? = null
 
     data class GameEntry(val name: String, val uri: String, val kind: String)
 
@@ -25,6 +28,7 @@ class MainActivity : Activity() {
         window.statusBarColor = Color.rgb(12, 15, 23)
         window.navigationBarColor = Color.rgb(12, 15, 23)
         loadLibrary()
+        installedRuntime = RuntimePackageManager.findInstalled(filesDir)
         buildScreen()
     }
 
@@ -53,10 +57,20 @@ class MainActivity : Activity() {
         }
         content.addView(subtitle)
 
+        val runtimeText = installedRuntime?.let {
+            "RUNTIME PACKAGE IMPORTED\n" +
+                "${it.name} (${it.version}) • ${it.abi}\n" +
+                "Box64, Wine, wineserver, and DXVK files passed package checks. " +
+                "This does not prove Android can execute them; EXE launching is not implemented yet."
+        } ?: (
+            "NO RUNTIME PACKAGE INSTALLED\n" +
+                "Import a compatible ARM64 runtime ZIP. It must include Box64, Wine, wineserver, " +
+                "DXVK DLLs, runtime.json, and matching SHA-256 hashes."
+            )
+
         val runtimeCard = TextView(this).apply {
-            text = "RUNTIME NOT INSTALLED\n" + NativeBridge.status() +
-                "\n\nImporting an EXE stores it in the library; it does not launch the game yet. " +
-                "Wine + Box64 and graphics/audio/input components are not bundled in this build.\\n\\nDEVICE / VULKAN\\n" + NativeBridge.device()
+            text = runtimeText + "\n\n" + NativeBridge.status() +
+                "\n\nDEVICE / VULKAN\n" + NativeBridge.device()
             textSize = 13f
             setTextColor(Color.rgb(255, 220, 150))
             setBackgroundColor(Color.rgb(43, 36, 25))
@@ -66,6 +80,7 @@ class MainActivity : Activity() {
 
         content.addView(actionButton("IMPORT WINDOWS EXE") { chooseExe() }, buttonParams())
         content.addView(actionButton("ADD GAME DATA FOLDER") { chooseFolder() }, buttonParams())
+        content.addView(actionButton("IMPORT WINE + BOX64 RUNTIME (.ZIP)") { chooseRuntimePackage() }, buttonParams())
 
         val section = TextView(this).apply {
             text = "GAME LIBRARY"
@@ -128,6 +143,16 @@ class MainActivity : Activity() {
         startActivityForResult(intent, REQUEST_FOLDER)
     }
 
+    private fun chooseRuntimePackage() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/zip", "application/x-zip-compressed"))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+        startActivityForResult(intent, REQUEST_RUNTIME)
+    }
+
     @Deprecated("Platform document picker is used for broad Android compatibility")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
@@ -159,7 +184,46 @@ class MainActivity : Activity() {
                 val name = queryDisplayName(uri) ?: "Game data folder"
                 addGame(GameEntry(name, uri.toString(), "Game data folder"))
             }
+            REQUEST_RUNTIME -> importRuntimePackage(uri)
         }
+    }
+
+    private fun importRuntimePackage(uri: Uri) {
+        val progress = ProgressDialog.show(
+            this,
+            "Importing runtime package",
+            "Extracting files and checking SHA-256. Keep the app open.",
+            true,
+            false
+        )
+
+        Thread {
+            try {
+                val info = RuntimePackageManager.install(contentResolver, uri, filesDir)
+                runOnUiThread {
+                    progress.dismiss()
+                    installedRuntime = info
+                    buildScreen()
+                    AlertDialog.Builder(this)
+                        .setTitle("Runtime package imported")
+                        .setMessage(
+                            "${info.name} ${info.version} has passed the package checks.\n\n" +
+                                "This is not an execution test. Starting EXE files is still unavailable."
+                        )
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    progress.dismiss()
+                    AlertDialog.Builder(this)
+                        .setTitle("Runtime import failed")
+                        .setMessage(error.message ?: "The archive could not be installed.")
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
+            }
+        }.start()
     }
 
     private fun queryDisplayName(uri: Uri): String? {
@@ -189,6 +253,23 @@ class MainActivity : Activity() {
         games.removeAll { it.uri == entry.uri }
         saveLibrary()
         buildScreen()
+    }
+
+    private fun createGameProfile(game: GameEntry) {
+        try {
+            val profile = GameContainerManager.create(this, game.name, game.uri)
+            AlertDialog.Builder(this)
+                .setTitle("Game workspace created")
+                .setMessage(
+                    "Profile ID: ${profile.id}\n" +
+                        "Directory: ${profile.directory.absolutePath}\n\n" +
+                        "This is only a per-game workspace. Wine has not initialized it as a valid prefix yet."
+                )
+                .setPositiveButton("OK", null)
+                .show()
+        } catch (error: Exception) {
+            Toast.makeText(this, error.message ?: "Could not create game profile.", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun loadLibrary() {
@@ -275,6 +356,14 @@ class MainActivity : Activity() {
             card.addView(name)
             card.addView(kind)
             card.addView(uri)
+            if (game.kind == "Windows executable") {
+                val profileButton = Button(this).apply {
+                    text = "Create game workspace"
+                    isAllCaps = false
+                    setOnClickListener { createGameProfile(game) }
+                }
+                card.addView(profileButton)
+            }
             card.addView(remove)
             val params = matchWidth().apply { bottomMargin = dp(10) }
             list.addView(card, params)
@@ -286,6 +375,7 @@ class MainActivity : Activity() {
     companion object {
         private const val REQUEST_EXE = 1001
         private const val REQUEST_FOLDER = 1002
+        private const val REQUEST_RUNTIME = 1003
         private const val KEY_GAMES = "games"
     }
 }
