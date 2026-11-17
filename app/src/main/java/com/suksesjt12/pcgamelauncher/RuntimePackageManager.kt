@@ -167,7 +167,7 @@ object RuntimePackageManager {
         if (parts.isEmpty() || parts.any { it.isBlank() || it == "." || it == ".." }) {
             error("Arsip memiliki path traversal atau segmen kosong.")
         }
-        if (parts.any { it.contains('\u0000') }) error("Path mengandung karakter tidak valid.")
+        if (parts.any { part -> part.any { character -> character.code == 0 } }) error("Path mengandung karakter tidak valid.")
         return parts.joinToString("/")
     }
 
