@@ -58,18 +58,17 @@ class MainActivity : Activity() {
         content.addView(subtitle)
 
         val runtimeText = installedRuntime?.let {
-            "RUNTIME PACKAGE IMPORTED\n" +
-                "${it.name} (${it.version}) • ${it.abi}\n" +
-                "Box64, Wine, wineserver, and DXVK files passed package checks. " +
-                "This does not prove Android can execute them; EXE launching is not implemented yet."
+            "WINE RUNTIME PACKAGE IMPORTED\n" +
+                "${it.name} (${it.version}) • ${it.hostAbi}\n" +
+                "wine64, wineserver, wineboot.exe, and DXVK passed architecture/hash checks."
         } ?: (
-            "NO RUNTIME PACKAGE INSTALLED\n" +
-                "Import a compatible ARM64 runtime ZIP. It must include Box64, Wine, wineserver, " +
-                "DXVK DLLs, runtime.json, and matching SHA-256 hashes."
+            "NO WINE RUNTIME PACKAGE INSTALLED\n" +
+                "Import a schema v2 ZIP containing x86_64 Wine, wineserver, wineboot.exe, and DXVK."
             )
 
         val runtimeCard = TextView(this).apply {
-            text = runtimeText + "\n\n" + NativeBridge.status() +
+            text = RuntimeExecutionManager.engineStatus(this@MainActivity) +
+                "\n\n" + runtimeText + "\n\n" + NativeBridge.status() +
                 "\n\nDEVICE / VULKAN\n" + NativeBridge.device()
             textSize = 13f
             setTextColor(Color.rgb(255, 220, 150))
@@ -80,7 +79,8 @@ class MainActivity : Activity() {
 
         content.addView(actionButton("IMPORT WINDOWS EXE") { chooseExe() }, buttonParams())
         content.addView(actionButton("ADD GAME DATA FOLDER") { chooseFolder() }, buttonParams())
-        content.addView(actionButton("IMPORT WINE + BOX64 RUNTIME (.ZIP)") { chooseRuntimePackage() }, buttonParams())
+        content.addView(actionButton("IMPORT WINE + DXVK RUNTIME (.ZIP)") { chooseRuntimePackage() }, buttonParams())
+        content.addView(actionButton("TEST BOX64 + WINE") { probeRuntime() }, buttonParams())
 
         val section = TextView(this).apply {
             text = "GAME LIBRARY"
@@ -226,6 +226,95 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    private fun probeRuntime() {
+        val runtime = installedRuntime
+        if (runtime == null) {
+            showMessage("Runtime belum tersedia", "Impor paket Wine + DXVK schema v2 terlebih dahulu.")
+            return
+        }
+        runRuntimeTask("Testing Box64 + Wine") {
+            RuntimeExecutionManager.probeWine(this, runtime)
+        }
+    }
+
+    private fun initializeWinePrefix(game: GameEntry) {
+        val runtime = installedRuntime
+        if (runtime == null) {
+            showMessage("Runtime belum tersedia", "Impor paket Wine + DXVK schema v2 terlebih dahulu.")
+            return
+        }
+
+        val profile = try {
+            GameContainerManager.create(this, game.name, game.uri)
+        } catch (error: Exception) {
+            showMessage("Workspace gagal dibuat", error.message ?: "Kesalahan direktori.")
+            return
+        }
+
+        runRuntimeTask("Initializing Wine prefix") {
+            val result = RuntimeExecutionManager.initializeWinePrefix(this, runtime, profile.directory)
+            GameContainerManager.setPrefixState(
+                profile,
+                if (result.success) "wine_prefix_initialized" else "wine_prefix_initialization_failed"
+            )
+            result
+        }
+    }
+
+    private fun runRuntimeTask(
+        title: String,
+        operation: () -> RuntimeExecutionManager.Result
+    ) {
+        val progress = ProgressDialog.show(
+            this,
+            title,
+            "Runtime sedang diproses. Jangan tutup aplikasi.",
+            true,
+            false
+        )
+
+        Thread {
+            val result = try {
+                operation()
+            } catch (error: Exception) {
+                RuntimeExecutionManager.Result(
+                    false,
+                    "Application",
+                    null,
+                    error.message ?: error.javaClass.simpleName
+                )
+            }
+
+            runOnUiThread {
+                progress.dismiss()
+                val summary = buildString {
+                    append(if (result.success) "SUCCESS" else "FAILED")
+                    append("\\nStage: ")
+                    append(result.stage)
+                    result.exitCode?.let {
+                        append("\\nExit code: ")
+                        append(it)
+                    }
+                    append("\\n\\n")
+                    append(result.output)
+                }
+                AlertDialog.Builder(this)
+                    .setTitle(title)
+                    .setMessage(summary)
+                    .setPositiveButton("OK", null)
+                    .show()
+            }
+        }.start()
+    }
+
+    private fun showMessage(title: String, message: String) {
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton("OK", null)
+            .show()
+    }
+
     private fun queryDisplayName(uri: Uri): String? {
         return try {
             contentResolver.query(
@@ -363,6 +452,13 @@ class MainActivity : Activity() {
                     setOnClickListener { createGameProfile(game) }
                 }
                 card.addView(profileButton)
+
+                val initializeButton = Button(this).apply {
+                    text = "Initialize Wine prefix"
+                    isAllCaps = false
+                    setOnClickListener { initializeWinePrefix(game) }
+                }
+                card.addView(initializeButton)
             }
             card.addView(remove)
             val params = matchWidth().apply { bottomMargin = dp(10) }
