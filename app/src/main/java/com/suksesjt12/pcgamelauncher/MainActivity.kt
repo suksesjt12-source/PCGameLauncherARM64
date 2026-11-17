@@ -96,7 +96,7 @@ class MainActivity : Activity() {
         renderLibrary(list)
 
         val footer = TextView(this).apply {
-            text = "PCGameLauncherARM64 • v0.1.0\nDesigned for Android ARM64 devices. Game compatibility and performance are not guaranteed."
+            text = "PCGameLauncherARM64 • v0.2.0\nDesigned for Android ARM64 devices. Game compatibility and performance are not guaranteed."
             textSize = 11f
             setTextColor(Color.rgb(120, 132, 153))
             gravity = Gravity.CENTER
