@@ -4,4 +4,6 @@ project(launcher_native LANGUAGES CXX)
 add_library(launcher_native SHARED nativebridge.cpp)
 
 find_library(log-lib log)
-target_link_libraries(launcher_native ${log-lib})
+find_library(vulkan-lib vulkan)
+
+target_link_libraries(launcher_native ${log-lib} ${vulkan-lib})
