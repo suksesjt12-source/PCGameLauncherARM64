@@ -6,27 +6,27 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.RandomAccessFile
 import java.security.MessageDigest
 import java.util.zip.ZipInputStream
 
 /**
- * Imports a user-provided runtime archive into private app storage.
- *
- * Archive format is documented in docs/runtime-package-format.md.
- * Importing files does not guarantee that Android can execute the binaries.
+ * Imports the x86_64 Wine/DXVK userspace files.
+ * The native ARM64 Box64 engine is packaged inside the APK, not extracted here.
  */
 object RuntimePackageManager {
     data class RuntimeInfo(
         val id: String,
         val name: String,
         val version: String,
-        val abi: String,
+        val hostAbi: String,
         val root: File,
-        val box64: File,
-        val wine: File,
+        val wine64: File,
         val wineserver: File,
+        val winebootExe: File,
         val dxvkD3d11: File,
-        val dxvkDxgi: File
+        val dxvkDxgi: File,
+        val libraryPaths: List<File>
     )
 
     private const val MANIFEST = "runtime.json"
@@ -52,8 +52,7 @@ object RuntimePackageManager {
             extractSafely(resolver, archiveUri, staging)
             val info = readAndValidate(staging, verifyHashes = true)
 
-            val destinationName = "${info.id}-${info.version}"
-            val destination = File(runtimesDir, destinationName)
+            val destination = File(runtimesDir, "${info.id}-${info.version}")
             if (destination.exists()) {
                 error("Runtime ${info.name} versi ${info.version} sudah ada.")
             }
@@ -80,7 +79,11 @@ object RuntimePackageManager {
     fun findInstalled(filesDir: File): RuntimeInfo? {
         val runtimesDir = File(File(filesDir, "pcgl"), "runtimes")
         val candidates = runtimesDir.listFiles()
-            ?.filter { it.isDirectory && !it.name.startsWith(".staging-") && File(it, INSTALLED_MARKER).isFile }
+            ?.filter {
+                it.isDirectory &&
+                    !it.name.startsWith(".staging-") &&
+                    File(it, INSTALLED_MARKER).isFile
+            }
             ?.sortedByDescending { it.lastModified() }
             ?: return null
 
@@ -88,7 +91,7 @@ object RuntimePackageManager {
             try {
                 return readAndValidate(candidate, verifyHashes = false)
             } catch (_: Exception) {
-                // Ignore an incomplete or damaged installation and inspect the next one.
+                // Ignore incomplete or damaged packages.
             }
         }
         return null
@@ -111,8 +114,7 @@ object RuntimePackageManager {
                 if (!seen.add(relativePath)) error("Arsip memiliki path duplikat: $relativePath")
 
                 val output = File(root, relativePath).canonicalFile
-                val rootPrefix = root.path + File.separator
-                if (!output.path.startsWith(rootPrefix)) {
+                if (!output.path.startsWith(root.path + File.separator)) {
                     error("Arsip berisi path di luar direktori tujuan.")
                 }
 
@@ -165,7 +167,7 @@ object RuntimePackageManager {
         if (parts.isEmpty() || parts.any { it.isBlank() || it == "." || it == ".." }) {
             error("Arsip memiliki path traversal atau segmen kosong.")
         }
-        if (parts.any { it.contains('\u0000') }) error("Path mengandung karakter tidak valid.")
+        if (parts.any { it.contains('\\u0000') }) error("Path mengandung karakter tidak valid.")
         return parts.joinToString("/")
     }
 
@@ -176,18 +178,18 @@ object RuntimePackageManager {
         }
 
         val manifest = JSONObject(manifestFile.readText(Charsets.UTF_8))
-        if (manifest.optInt("schemaVersion", -1) != 1) {
-            error("Versi format runtime.json tidak didukung.")
+        if (manifest.optInt("schemaVersion", -1) != 2) {
+            error("Format runtime harus schemaVersion 2.")
         }
 
         val id = manifest.optString("id", "")
         val name = manifest.optString("name", "")
         val version = manifest.optString("version", "")
-        val abi = manifest.optString("abi", "")
+        val hostAbi = manifest.optString("hostAbi", "")
         if (!id.matches(Regex("^[A-Za-z0-9._-]{1,64}$"))) error("ID runtime tidak valid.")
         if (name.isBlank() || name.length > 100) error("Nama runtime tidak valid.")
         if (!version.matches(Regex("^[A-Za-z0-9._-]{1,32}$"))) error("Versi runtime tidak valid.")
-        if (abi != "arm64-v8a") error("Paket ini bukan runtime Android ARM64 (arm64-v8a).")
+        if (hostAbi != "arm64-v8a") error("Paket ini bukan untuk host Android ARM64.")
 
         val components = manifest.optJSONObject("components")
             ?: error("Bagian components tidak ditemukan.")
@@ -215,23 +217,59 @@ object RuntimePackageManager {
             return file
         }
 
-        val box64 = component("box64")
-        val wine = component("wine")
+        val wine64 = component("wine64")
         val wineserver = component("wineserver")
+        val winebootExe = component("winebootExe")
         val dxvkD3d11 = component("dxvkD3d11")
         val dxvkDxgi = component("dxvkDxgi")
 
-        if (!isAarch64Elf(box64)) {
-            error("Binary Box64 bukan ELF 64-bit little-endian AArch64.")
+        if (!isElfMachine(wine64, 62)) {
+            error("wine64 harus berupa ELF x86_64 (EM_X86_64).")
+        }
+        if (!isElfMachine(wineserver, 62)) {
+            error("wineserver harus berupa ELF x86_64 (EM_X86_64).")
+        }
+        if (!isPe64X64(winebootExe)) {
+            error("wineboot.exe harus berupa PE32+ x86_64.")
+        }
+        if (!isPe64X64(dxvkD3d11) || !isPe64X64(dxvkDxgi)) {
+            error("DXVK d3d11.dll dan dxgi.dll harus berupa PE32+ x86_64.")
         }
 
-        box64.setExecutable(true, false)
-        wine.setExecutable(true, false)
-        wineserver.setExecutable(true, false)
+        // Box64 reads these as guest binaries; Android does not exec them directly.
+        listOf(wine64, wineserver).forEach {
+            if (!it.setExecutable(true, false) && !it.canExecute()) {
+                error("Tidak dapat mengatur permission guest binary: ${it.name}")
+            }
+        }
+
+        val libraryPaths = mutableListOf<File>()
+        val declaredPaths = manifest.optJSONArray("libraryPaths")
+        if (declaredPaths != null) {
+            for (index in 0 until declaredPaths.length()) {
+                val relative = normalizeEntryPath(declaredPaths.optString(index, ""))
+                val directory = File(root, relative).canonicalFile
+                if (!directory.path.startsWith(root.canonicalPath + File.separator) ||
+                    !directory.isDirectory
+                ) {
+                    error("Direktori library tidak valid: $relative")
+                }
+                libraryPaths.add(directory)
+            }
+        }
 
         return RuntimeInfo(
-            id, name, version, abi, root,
-            box64, wine, wineserver, dxvkD3d11, dxvkDxgi
+            id = id,
+            name = name,
+            version = version,
+            hostAbi = hostAbi,
+            root = root,
+            wine64 = wine64,
+            wineserver = wineserver,
+            winebootExe = winebootExe,
+            dxvkD3d11 = dxvkD3d11,
+            dxvkDxgi = dxvkDxgi,
+            libraryPaths = libraryPaths
         )
     }
 
@@ -248,7 +286,7 @@ object RuntimePackageManager {
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
-    private fun isAarch64Elf(file: File): Boolean {
+    private fun isElfMachine(file: File, expectedMachine: Int): Boolean {
         val header = ByteArray(20)
         FileInputStream(file).use { input ->
             var offset = 0
@@ -258,13 +296,58 @@ object RuntimePackageManager {
                 offset += count
             }
         }
+
         val isElf = header[0] == 0x7f.toByte() &&
             header[1] == 'E'.code.toByte() &&
             header[2] == 'L'.code.toByte() &&
             header[3] == 'F'.code.toByte()
         val is64BitLittleEndian = header[4] == 2.toByte() && header[5] == 1.toByte()
+        val elfType = (header[16].toInt() and 0xff) or
+            ((header[17].toInt() and 0xff) shl 8)
         val machine = (header[18].toInt() and 0xff) or
             ((header[19].toInt() and 0xff) shl 8)
-        return isElf && is64BitLittleEndian && machine == 183
+        return isElf && is64BitLittleEndian && elfType in 2..3 && machine == expectedMachine
+    }
+
+    private fun isPe64X64(file: File): Boolean {
+        return try {
+            RandomAccessFile(file, "r").use { input ->
+                if (input.length() < 0x40) return false
+                if (input.readUnsignedByte() != 'M'.code || input.readUnsignedByte() != 'Z'.code) {
+                    return false
+                }
+                input.seek(0x3c)
+                val offset = readIntLe(input).toLong()
+                if (offset < 0x40 || offset + 26 > input.length()) return false
+
+                input.seek(offset)
+                if (input.readUnsignedByte() != 'P'.code ||
+                    input.readUnsignedByte() != 'E'.code ||
+                    input.readUnsignedByte() != 0 ||
+                    input.readUnsignedByte() != 0
+                ) return false
+
+                val machine = readUShortLe(input)
+                input.seek(offset + 24)
+                val optionalMagic = readUShortLe(input)
+                machine == 0x8664 && optionalMagic == 0x20b
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun readUShortLe(input: RandomAccessFile): Int {
+        val low = input.readUnsignedByte()
+        val high = input.readUnsignedByte()
+        return low or (high shl 8)
+    }
+
+    private fun readIntLe(input: RandomAccessFile): Int {
+        val b0 = input.readUnsignedByte()
+        val b1 = input.readUnsignedByte()
+        val b2 = input.readUnsignedByte()
+        val b3 = input.readUnsignedByte()
+        return b0 or (b1 shl 8) or (b2 shl 16) or (b3 shl 24)
     }
 }
