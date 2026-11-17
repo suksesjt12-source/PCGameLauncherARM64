@@ -56,7 +56,7 @@ class MainActivity : Activity() {
         val runtimeCard = TextView(this).apply {
             text = "RUNTIME NOT INSTALLED\n" + NativeBridge.status() +
                 "\n\nImporting an EXE stores it in the library; it does not launch the game yet. " +
-                "Wine + Box64 and graphics/audio/input components are not bundled in this build."
+                "Wine + Box64 and graphics/audio/input components are not bundled in this build.\\n\\nDEVICE / VULKAN\\n" + NativeBridge.device()
             textSize = 13f
             setTextColor(Color.rgb(255, 220, 150))
             setBackgroundColor(Color.rgb(43, 36, 25))
