@@ -90,6 +90,16 @@ jobs:
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
 
+      - name: Verify Box64 is packaged in APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .verify
+          unzip -p app/build/outputs/apk/debug/app-debug.apk lib/arm64-v8a/libbox64.so > .verify/libbox64.so
+          test -s .verify/libbox64.so
+          file .verify/libbox64.so
+          readelf -h .verify/libbox64.so | grep -q "AArch64"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
