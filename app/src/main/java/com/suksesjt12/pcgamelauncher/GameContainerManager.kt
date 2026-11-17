@@ -56,4 +56,12 @@ object GameContainerManager {
         profileFile.writeText(profile.toString(2), Charsets.UTF_8)
         return Profile(id, directory, profileFile)
     }
+
+    fun setPrefixState(profile: Profile, state: String) {
+        val json = JSONObject(profile.profileFile.readText(Charsets.UTF_8))
+        json.put("state", state)
+        json.put("lastUpdatedAt", System.currentTimeMillis())
+        profile.profileFile.writeText(json.toString(2), Charsets.UTF_8)
+    }
+
 }
