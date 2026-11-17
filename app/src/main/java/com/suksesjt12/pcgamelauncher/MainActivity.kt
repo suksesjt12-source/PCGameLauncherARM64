@@ -9,9 +9,11 @@ import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.text.InputType
 import android.widget.Toast
 import org.json.JSONArray
 import org.json.JSONObject
@@ -81,6 +83,20 @@ class MainActivity : Activity() {
         content.addView(actionButton("ADD GAME DATA FOLDER") { chooseFolder() }, buttonParams())
         content.addView(actionButton("IMPORT WINE + DXVK RUNTIME (.ZIP)") { chooseRuntimePackage() }, buttonParams())
         content.addView(actionButton("TEST BOX64 + WINE") { probeRuntime() }, buttonParams())
+        content.addView(actionButton("STOP RUNNING GAME") { stopRunningGame() }, buttonParams())
+
+        val processStatus = TextView(this).apply {
+            text = if (RuntimeExecutionManager.isGameRunning()) {
+                "GAME PROCESS: RUNNING"
+            } else {
+                RuntimeExecutionManager.lastGameExitCode()?.let { "LAST GAME EXIT CODE: $it" }
+                    ?: "GAME PROCESS: IDLE"
+            }
+            textSize = 12f
+            setTextColor(Color.rgb(155, 166, 187))
+            setPadding(0, dp(10), 0, dp(4))
+        }
+        content.addView(processStatus)
 
         val section = TextView(this).apply {
             text = "GAME LIBRARY"
@@ -96,7 +112,7 @@ class MainActivity : Activity() {
         renderLibrary(list)
 
         val footer = TextView(this).apply {
-            text = "PCGameLauncherARM64 • v0.3.0\nDesigned for Android ARM64 devices. Game compatibility and performance are not guaranteed."
+            text = "PCGameLauncherARM64 • v0.4.0\nDesigned for Android ARM64 devices. Game compatibility and performance are not guaranteed."
             textSize = 11f
             setTextColor(Color.rgb(120, 132, 153))
             gravity = Gravity.CENTER
@@ -207,8 +223,8 @@ class MainActivity : Activity() {
                     AlertDialog.Builder(this)
                         .setTitle("Runtime package imported")
                         .setMessage(
-                            "${info.name} ${info.version} has passed the package checks.\n\n" +
-                                "This is not an execution test. Starting EXE files is still unavailable."
+                            "${info.name} ${info.version} passed the package checks.\n\n" +
+                                "Use TEST BOX64 + WINE to check basic runtime startup. A game still needs an initialized Wine prefix."
                         )
                         .setPositiveButton("OK", null)
                         .show()
@@ -258,6 +274,180 @@ class MainActivity : Activity() {
                 if (result.success) "wine_prefix_initialized" else "wine_prefix_initialization_failed"
             )
             result
+        }
+    }
+
+    private fun requestGameLaunch(game: GameEntry) {
+        if (installedRuntime == null) {
+            showMessage("Runtime belum tersedia", "Impor paket Wine + DXVK schema v2 terlebih dahulu.")
+            return
+        }
+
+        val argumentsInput = EditText(this).apply {
+            hint = "Contoh: -windowed -novid"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            setSingleLine(false)
+            minLines = 2
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Launch ${game.name}")
+            .setMessage("Argumen tambahan opsional. Gunakan tanda kutip untuk argumen yang berisi spasi.")
+            .setView(argumentsInput)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Launch") { _, _ ->
+                val arguments = try {
+                    parseArguments(argumentsInput.text.toString())
+                } catch (error: Exception) {
+                    showMessage("Argumen tidak valid", error.message ?: "Format argumen tidak valid.")
+                    return@setPositiveButton
+                }
+                launchGame(game, arguments)
+            }
+            .show()
+    }
+
+    private fun parseArguments(raw: String): List<String> {
+        val result = mutableListOf<String>()
+        val token = StringBuilder()
+        var quote: Char? = null
+        var escaping = false
+        var tokenStarted = false
+
+        for (character in raw) {
+            if (escaping) {
+                token.append(character)
+                escaping = false
+                tokenStarted = true
+                continue
+            }
+            if (quote != null) {
+                when {
+                    character == quote -> quote = null
+                    character == '\\\\' -> escaping = true
+                    else -> token.append(character)
+                }
+                tokenStarted = true
+                continue
+            }
+            when {
+                character == '"' || character == '\\'' -> {
+                    quote = character
+                    tokenStarted = true
+                }
+                character.isWhitespace() -> {
+                    if (tokenStarted) {
+                        result.add(token.toString())
+                        token.setLength(0)
+                        tokenStarted = false
+                    }
+                }
+                else -> {
+                    token.append(character)
+                    tokenStarted = true
+                }
+            }
+        }
+
+        if (escaping) token.append('\\\\')
+        if (quote != null) error("Tanda kutip argumen belum ditutup.")
+        if (tokenStarted) result.add(token.toString())
+        if (result.size > 128 || result.any { it.length > 8192 }) {
+            error("Argumen peluncuran terlalu panjang.")
+        }
+        return result
+    }
+
+    private fun launchGame(game: GameEntry, arguments: List<String>) {
+        val runtime = installedRuntime ?: return
+        val profile = try {
+            GameContainerManager.create(this, game.name, game.uri)
+        } catch (error: Exception) {
+            showMessage("Workspace gagal dibuat", error.message ?: "Kesalahan direktori.")
+            return
+        }
+
+        if (!GameContainerManager.isPrefixInitialized(profile)) {
+            showMessage(
+                "Wine prefix belum siap",
+                "Tekan Initialize Wine prefix pada kartu game ini, tunggu sampai berhasil, lalu coba Launch EXE lagi."
+            )
+            return
+        }
+
+        val progress = ProgressDialog.show(
+            this,
+            "Preparing game",
+            "Menyalin EXE ke workspace privat dan memulai Box64/Wine.",
+            true,
+            false
+        )
+
+        Thread {
+            val result = try {
+                val prepared = GameLaunchManager.prepareExecutable(
+                    resolver = contentResolver,
+                    runtime = runtime,
+                    profile = profile,
+                    sourceUri = Uri.parse(game.uri),
+                    displayName = game.name
+                )
+                val launch = RuntimeExecutionManager.launchWindowsGame(
+                    context = this,
+                    runtime = runtime,
+                    profile = prepared.profile,
+                    executable = prepared.executable,
+                    arguments = arguments
+                )
+                Triple(prepared, launch, null as String?)
+            } catch (error: Exception) {
+                Triple(null, null, error.message ?: error.javaClass.simpleName)
+            }
+
+            runOnUiThread {
+                progress.dismiss()
+                val prepared = result.first
+                val launch = result.second
+                val error = result.third
+
+                if (prepared == null || launch == null || !launch.success) {
+                    showMessage(
+                        "Game tidak berhasil dimulai",
+                        error ?: launch?.message ?: "Kesalahan runtime yang tidak diketahui."
+                    )
+                    return@runOnUiThread
+                }
+
+                val details =
+                    "Box64 process PID: ${launch.pid}\n" +
+                    "Executable: ${prepared.executable.absolutePath}\n" +
+                    "Guest architecture: ${prepared.architecture}\n" +
+                    "Log: ${launch.logFile?.absolutePath}\n\n" +
+                    launch.message
+
+                AlertDialog.Builder(this)
+                    .setTitle("Launch request dikirim")
+                    .setMessage(details)
+                    .setNegativeButton("Close", null)
+                    .setPositiveButton("Stop game") { _, _ -> stopRunningGame() }
+                    .show()
+                buildScreen()
+            }
+        }.start()
+    }
+
+    private fun stopRunningGame() {
+        val runtime = installedRuntime
+        if (runtime == null) {
+            showMessage("Runtime belum tersedia", "Runtime Wine perlu diimpor sebelum menghentikan proses.")
+            return
+        }
+        if (!RuntimeExecutionManager.isGameRunning()) {
+            showMessage("Tidak ada game aktif", "Saat ini tidak ada proses game yang tercatat berjalan.")
+            return
+        }
+        runRuntimeTask("Stop running game") {
+            RuntimeExecutionManager.stopWindowsGame(this, runtime)
         }
     }
 
@@ -459,6 +649,13 @@ class MainActivity : Activity() {
                     setOnClickListener { initializeWinePrefix(game) }
                 }
                 card.addView(initializeButton)
+
+                val launchButton = Button(this).apply {
+                    text = "Launch EXE through Wine"
+                    isAllCaps = false
+                    setOnClickListener { requestGameLaunch(game) }
+                }
+                card.addView(launchButton)
             }
             card.addView(remove)
             val params = matchWidth().apply { bottomMargin = dp(10) }
