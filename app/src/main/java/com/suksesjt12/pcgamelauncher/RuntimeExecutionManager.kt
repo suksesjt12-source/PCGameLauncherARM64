@@ -111,7 +111,7 @@ object RuntimeExecutionManager {
                 put("BOX64_NOBANNER", "1")
                 put("PATH", runtime.wine64.parentFile.absolutePath + File.pathSeparator + (get("PATH") ?: ""))
                 if (GameContainerManager.isDxvkEnabled(profile)) {
-                    val dxvkCache = File(profileRoot, "shader-cache/dxvk")
+                    val dxvkCache = File(prefixRoot, "shader-cache/dxvk")
                     if (!dxvkCache.exists()) dxvkCache.mkdirs()
                     put("WINEDLLOVERRIDES", "d3d11,dxgi=n,b")
                     put("DXVK_LOG_LEVEL", "none")
