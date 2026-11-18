@@ -48,7 +48,8 @@ object WineRuntimeEnvironment {
         environment: MutableMap<String, String>,
         audioMode: String = "default",
         pulseLatencyMs: Int = 60,
-        displayEndpoint: String? = null
+        displayEndpoint: String? = null,
+        xAuthorityFile: File? = null
     ) {
         val validation = validate(context, runtime)
         if (!validation.isReady) {
@@ -111,11 +112,24 @@ object WineRuntimeEnvironment {
             it.matches(Regex("^(?::[0-9]+|localhost:[0-9]+|127\\.0\\.0\\.1:[0-9]+)(\\.[0-9]+)?$"))
         }
         if (validatedDisplay != null) {
+            val isLoopbackTcp = validatedDisplay.startsWith("127.0.0.1:")
+            val authority = xAuthorityFile?.canonicalFile
+            if (isLoopbackTcp) {
+                require(authority != null && authority.isFile) {
+                    "Authenticated X11 TCP display requires a valid XAUTHORITY file."
+                }
+            }
             environment["DISPLAY"] = validatedDisplay
+            if (authority != null && authority.isFile) {
+                environment["XAUTHORITY"] = authority.absolutePath
+            } else {
+                environment.remove("XAUTHORITY")
+            }
             environment["WINE_X11FORCEGLX"] = "1"
             environment["BOX64_X11GLX"] = "1"
         } else {
             environment.remove("DISPLAY")
+            environment.remove("XAUTHORITY")
             environment.remove("WINE_X11FORCEGLX")
             environment.remove("BOX64_X11GLX")
         }
