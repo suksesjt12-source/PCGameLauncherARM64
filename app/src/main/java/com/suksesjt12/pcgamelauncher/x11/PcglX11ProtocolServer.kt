@@ -6,6 +6,7 @@ import java.io.File
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.security.SecureRandom
 
 /**
  * PCGL-owned X11 core server.
@@ -18,9 +19,15 @@ class PcglX11ProtocolServer(
     runtimeRoot: File,
     private val screenWidthPx: Int = 1280,
     private val screenHeightPx: Int = 720,
+    private val tcpPort: Int? = null,
     frameSink: (PcglWindowFrame) -> Unit = {}
 ) : AutoCloseable {
-    data class Endpoint(val socketPath: String, val protocolVersion: String = "11.0")
+    data class Endpoint(
+        val socketPath: String,
+        val protocolVersion: String = "11.0",
+        val displayEndpoint: String? = null,
+        val authCookie: ByteArray? = null
+    )
 
     private data class ClientState(
         var byteOrder: ByteOrder = ByteOrder.LITTLE_ENDIAN,
@@ -34,7 +41,12 @@ class PcglX11ProtocolServer(
     )
 
     private val framebuffer = PcglX11Framebuffer(screenWidthPx, screenHeightPx, frameSink)
+    private val authCookie: ByteArray? = if (tcpPort != null) {
+        ByteArray(16).also { SecureRandom().nextBytes(it) }
+    } else null
     private lateinit var transport: PcglX11Transport
+
+    fun copyAuthCookie(): ByteArray? = authCookie?.copyOf()
 
     private val dispatcher = object : PcglX11Transport.ProtocolDispatcher {
         override fun onClientConnected(client: Client) {
@@ -55,12 +67,19 @@ class PcglX11ProtocolServer(
 
     init {
         require(screenWidthPx > 0 && screenHeightPx > 0) { "X11 screen dimensions must be positive." }
-        transport = PcglX11Transport(runtimeRoot, dispatcher)
+        transport = PcglX11Transport(runtimeRoot, dispatcher, tcpPort = tcpPort)
     }
 
     @Synchronized
     @Throws(IOException::class)
-    fun start(): Endpoint = Endpoint(transport.start().socketPath)
+    fun start(): Endpoint {
+        val endpoint = transport.start()
+        return Endpoint(
+            socketPath = endpoint.socketPath,
+            displayEndpoint = endpoint.displayEndpoint.takeIf { it.isNotBlank() },
+            authCookie = authCookie?.copyOf()
+        )
+    }
 
     @Synchronized
     fun stop() = transport.stop()
@@ -84,7 +103,7 @@ class PcglX11ProtocolServer(
         }
 
         if (!state.setupComplete) {
-            when (val parsed = PcglX11SetupCodec.parseRequest(state.pending)) {
+            when (val parsed = PcglX11SetupCodec.parseRequest(state.pending, authCookie)) {
                 PcglX11SetupCodec.ParseResult.NeedMore -> return progressed
                 is PcglX11SetupCodec.ParseResult.Rejected -> {
                     writeResponse(client, PcglX11SetupCodec.buildFailure(parsed.byteOrder, parsed.reason))
