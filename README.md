@@ -14,7 +14,8 @@ This is not a renamed Winlator APK. The project uses interoperable runtime compo
 - EXE staging, argument parsing, process tracking, logs, and stop control.
 - Optional official DXVK download, checksum validation, installation, and per-game configuration.
 - Vulkan device and queue capability probe.
-- PCGL-owned Android Surface/EGL session, GLES shader pipeline, and a pluggable display-backend contract.
+- PCGL-owned Android Surface/EGL session and GLES diagnostic renderer.
+- PCGL-namespaced AF_UNIX/epoll X11 transport module with JNI client I/O and a protocol-dispatch lifecycle contract (transport only; X11 protocol server is still in progress).
 - Device temperature, memory, and process-memory monitor.
 - Per-game virtual keyboard/mouse controls and overlay.
 - Per-game graphics, audio, and controller preferences.
