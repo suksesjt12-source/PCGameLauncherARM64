@@ -9,7 +9,7 @@ Android ARM64 launcher project for organizing and testing legally owned Windows 
 - Keep a local game library.
 - Build the Box64 Android ARM64 host engine from a pinned upstream source revision during GitHub Actions.
 - Package Box64 inside the APK native library directory.
-- Import a user-provided Wine + DXVK runtime ZIP using schema version 2.
+- Import a compatible x86_64 Wine runtime ZIP using schema version 2; the DXVK DLL pair is optional.
 - Validate ZIP paths, extracted size, hashes, ELF architecture, and PE architecture.
 - Create separate per-game workspaces and preserve Wine prefix state.
 - Initialize a Wine prefix through Box64 and Wine's wineboot executable.
@@ -17,6 +17,7 @@ Android ARM64 launcher project for organizing and testing legally owned Windows 
 - Launch the selected EXE through the APK-packaged Box64 engine and supplied Wine binary with optional command-line arguments.
 - Track the launched process, record its log, and provide a stop action using wineserver.
 - Detect Vulkan physical devices, graphics/compute queues, API/driver versions, and device-local heap size through the native C++ bridge.
+- Download the latest official DXVK release directly from doitsujin/dxvk, verify the GitHub-published SHA-256 asset digest, and extract only the two x64 DLLs required by the current D3D11 installer.
 - Install validated x64 DXVK DLLs into an initialized Wine prefix and enable per-game native DLL overrides.
 - Configure per-game DXVK VSync, frame-rate limit, and HUD using an isolated config file.
 - Pass optional PulseAudio latency hints to Wine game processes.
@@ -33,8 +34,7 @@ Android ARM64 launcher project for organizing and testing legally owned Windows 
 
 See [docs/runtime-package-format.md](docs/runtime-package-format.md) for the required ZIP layout and schema.
 
-The APK workflow builds Box64 for Android ARM64 and embeds it as `libbox64.so`. The user
-runtime ZIP contains x86_64 Wine, wineserver, wineboot.exe, and x64 DXVK DLLs. Set
+The APK workflow builds Box64 for Android ARM64 and embeds it as `libbox64.so`, so Box64 does not need a separate download. The user runtime ZIP contains x86_64 Wine, wineserver, and wineboot.exe. DXVK is downloaded separately from official GitHub releases; the runtime ZIP may also bundle both DXVK DLLs. Set
 `supportsX86` to true only for a Wine build tested with 32-bit Windows support.
 
 ## Current limitations
@@ -44,9 +44,7 @@ The selected EXE is staged into the same working directory, allowing programs th
 relative paths to locate sibling assets and DLLs. The importer enforces 8 GiB total,
 4 GiB per file, 100,000 entries, and 48 levels. The source folder is not modified.
 
-DXVK installation and per-process Wine native DLL overrides are implemented. The
-Vulkan panel is only a device/queue capability probe; it does not prove that the device's
-driver is compatible with the selected DXVK build or that a Direct3D game will render.
+The in-app component manager downloads the latest official DXVK release only when GitHub publishes a SHA-256 digest for its release asset. It verifies the archive digest before extracting only x64 d3d11.dll and dxgi.dll. Older official releases without a published digest are deliberately rejected by the automatic downloader. DXVK installation and per-process Wine native DLL overrides are implemented. The Vulkan panel is only a device/queue capability probe; it does not prove that the device's driver is compatible with the selected DXVK build or that a Direct3D game will render.
 The PulseAudio setting is a client latency hint, not an audio-server installer or backend
 switch. The floating controller now sends mapped keyboard and mouse events through a small
 Wine helper using Win32 SendInput. It requires Android's "display over other apps" permission

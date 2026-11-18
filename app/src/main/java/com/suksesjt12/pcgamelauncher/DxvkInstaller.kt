@@ -9,12 +9,17 @@ import java.io.FileOutputStream
  * Native DLL overrides are scoped to the selected game's launch process.
  */
 object DxvkInstaller {
-    fun install(runtime: RuntimePackageManager.RuntimeInfo, profile: GameContainerManager.Profile): RuntimeExecutionManager.Result {
+    fun install(
+        dxvkD3d11: File,
+        dxvkDxgi: File,
+        version: String,
+        profile: GameContainerManager.Profile
+    ): RuntimeExecutionManager.Result {
         if (!GameContainerManager.isPrefixInitialized(profile)) {
             return RuntimeExecutionManager.Result(false, "DXVK install", null, "Wine prefix belum diinisialisasi.")
         }
-        if (RuntimePackageManager.inspectWindowsExecutable(runtime.dxvkD3d11) != "x86_64" ||
-            RuntimePackageManager.inspectWindowsExecutable(runtime.dxvkDxgi) != "x86_64"
+        if (RuntimePackageManager.inspectWindowsExecutable(dxvkD3d11) != "x86_64" ||
+            RuntimePackageManager.inspectWindowsExecutable(dxvkDxgi) != "x86_64"
         ) {
             return RuntimeExecutionManager.Result(false, "DXVK validation", null, "DXVK harus berupa DLL PE32+ x86-64.")
         }
@@ -32,9 +37,9 @@ object DxvkInstaller {
         val backupDirectory = File(prefixRoot, "pcgl-dxvk-backup")
         return try {
             if (!backupDirectory.exists() && !backupDirectory.mkdirs()) error("Tidak dapat membuat direktori backup DXVK.")
-            installOne(runtime.dxvkD3d11, File(system32, "d3d11.dll"), backupDirectory)
-            installOne(runtime.dxvkDxgi, File(system32, "dxgi.dll"), backupDirectory)
-            GameContainerManager.setDxvkState(profile, true, runtime.version)
+            installOne(dxvkD3d11, File(system32, "d3d11.dll"), backupDirectory)
+            installOne(dxvkDxgi, File(system32, "dxgi.dll"), backupDirectory)
+            GameContainerManager.setDxvkState(profile, true, version)
             RuntimeExecutionManager.Result(
                 true, "DXVK install", 0,
                 "d3d11.dll dan dxgi.dll DXVK telah dipasang ke Wine prefix. " +

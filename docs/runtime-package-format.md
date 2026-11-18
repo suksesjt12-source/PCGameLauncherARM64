@@ -33,7 +33,10 @@ wine-runtime.zip
 ```
 
 The paths are an example layout. A package may use other relative paths, provided the
-manifest points to the actual files and library directories.
+manifest points to the actual files and library directories. The `dxvk/` directory and
+the `dxvkD3d11` / `dxvkDxgi` manifest fields are optional. If either DXVK field is
+present, both DLLs and both SHA-256 entries are required. The launcher can download
+official DXVK releases independently from its component manager.
 
 ## Manifest
 
@@ -77,7 +80,8 @@ Set `supportsX86` to true only when the supplied Wine build has been confirmed t
 - Box64 is built for Android ARM64 (AArch64) and embedded into the APK by GitHub Actions.
 - `wine64` and `wineserver` must be 64-bit little-endian Linux ELF files with machine type x86-64.
 - `wineboot.exe`, `d3d11.dll`, and `dxgi.dll` must be PE32+ x86-64 files.
-- Each component listed in `components` must have a matching SHA-256 entry.
+- Required Wine components listed in `components` must have a matching SHA-256 entry.
+- DXVK is optional, but `dxvkD3d11` and `dxvkDxgi` must either both be present or both be omitted. If present, both require SHA-256 entries and must be PE32+ x86-64.
 - `libraryPaths` is optional. Each declared relative path must exist as a directory.
 - Game EXEs selected by the launcher are checked as PE32+ x86-64 or PE32 x86.
 - PE32 x86 games are accepted only when `supportsX86` is true.
@@ -105,7 +109,8 @@ or that Wine can initialize.
    directory. Its contents are copied to
    `drive_c/PCGameLauncher/<id>/game-data` with Windows-safe names and bounded recursion,
    entry count, and expanded size.
-7. Choose **Install DXVK (Vulkan)** to copy the validated x64 `d3d11.dll` and `dxgi.dll`
+7. Choose **DOWNLOAD / UPDATE OFFICIAL DXVK** in the component manager. The launcher reads the latest release metadata from the official GitHub repository, verifies the asset SHA-256 digest published by GitHub, and extracts only the two x64 DLLs. Alternatively, a runtime ZIP may bundle both DLLs.
+8. Choose **Install DXVK (Vulkan)** to copy the validated x64 `d3d11.dll` and `dxgi.dll`
    into `drive_c/windows/system32`. The launcher enables
    `WINEDLLOVERRIDES=d3d11,dxgi=n,b` for that game's process.
 8. Press **Launch EXE through Wine**. The selected EXE is staged in the same `game-data`
@@ -121,6 +126,9 @@ physical hardware is still required.
 ## Scope and limitations
 
 - Runtime import checks structure, hashes, file formats, and architecture, not runtime compatibility.
+- Box64 ARM64 is built and bundled inside the APK; it does not need a separate user download.
+- The in-app DXVK downloader requires an official GitHub release asset SHA-256 digest. Older official releases without that published digest are deliberately rejected by automatic installation.
+- The Wine runtime itself is not downloaded automatically because a generic desktop Wine build is not a compatible Android/Box64 runtime package. Users still need one compatible schema v2 Wine package.
 - Wine execution depends on the contents and build configuration of the supplied runtime ZIP.
 - Wine prefix initialization invokes `wineboot.exe` through Box64.
 - Game launch reports that the process started; it does not prove the game reached its main menu.

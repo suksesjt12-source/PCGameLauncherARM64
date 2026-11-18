@@ -197,8 +197,12 @@ object RuntimePackageManager {
         val hashes = manifest.optJSONObject("sha256")
             ?: error("Bagian sha256 tidak ditemukan.")
 
-        fun component(key: String): File {
+        fun component(key: String, required: Boolean = true): File? {
             val relative = components.optString(key, "")
+            if (relative.isBlank()) {
+                if (required) error("Komponen $key tidak ditemukan dalam manifest.")
+                return null
+            }
             val safe = normalizeEntryPath(relative)
             val file = File(root, safe).canonicalFile
             if (!file.path.startsWith(root.canonicalPath + File.separator)) {
@@ -218,11 +222,14 @@ object RuntimePackageManager {
             return file
         }
 
-        val wine64 = component("wine64")
-        val wineserver = component("wineserver")
-        val winebootExe = component("winebootExe")
-        val dxvkD3d11 = component("dxvkD3d11")
-        val dxvkDxgi = component("dxvkDxgi")
+        val wine64 = component("wine64")!!
+        val wineserver = component("wineserver")!!
+        val winebootExe = component("winebootExe")!!
+        val dxvkD3d11 = component("dxvkD3d11", required = false)
+        val dxvkDxgi = component("dxvkDxgi", required = false)
+        if ((dxvkD3d11 == null) != (dxvkDxgi == null)) {
+            error("Komponen DXVK harus menyertakan d3d11.dll dan dxgi.dll sekaligus.")
+        }
 
         if (!isElfMachine(wine64, 62)) {
             error("wine64 harus berupa ELF x86_64 (EM_X86_64).")
@@ -233,7 +240,9 @@ object RuntimePackageManager {
         if (!isPe64X64(winebootExe)) {
             error("wineboot.exe harus berupa PE32+ x86_64.")
         }
-        if (!isPe64X64(dxvkD3d11) || !isPe64X64(dxvkDxgi)) {
+        if (dxvkD3d11 != null && dxvkDxgi != null &&
+            (!isPe64X64(dxvkD3d11) || !isPe64X64(dxvkDxgi))
+        ) {
             error("DXVK d3d11.dll dan dxgi.dll harus berupa PE32+ x86_64.")
         }
 

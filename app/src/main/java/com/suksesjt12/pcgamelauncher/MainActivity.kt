@@ -28,6 +28,7 @@ class MainActivity : Activity() {
     private val prefs by lazy { getSharedPreferences("game_library", MODE_PRIVATE) }
     private val games = mutableListOf<GameEntry>()
     private var installedRuntime: RuntimePackageManager.RuntimeInfo? = null
+    private var installedDxvk: DxvkComponentManager.ComponentInfo? = null
     private var pendingGameFolder: GameEntry? = null
     private var performancePanel: TextView? = null
     private val performanceHandler = Handler(Looper.getMainLooper())
@@ -46,6 +47,7 @@ class MainActivity : Activity() {
         window.navigationBarColor = Color.rgb(12, 15, 23)
         loadLibrary()
         installedRuntime = RuntimePackageManager.findInstalled(filesDir)
+        installedDxvk = DxvkComponentManager.findInstalled(filesDir)
         buildScreen()
     }
 
@@ -91,17 +93,26 @@ class MainActivity : Activity() {
         content.addView(subtitle)
 
         val runtimeText = installedRuntime?.let {
-            "WINE RUNTIME PACKAGE IMPORTED\n" +
-                "${it.name} (${it.version}) • ${it.hostAbi}\n" +
-                "wine64, wineserver, wineboot.exe, and DXVK passed architecture/hash checks."
+            "WINE RUNTIME INSTALLED\n${it.name} (${it.version}) • ${it.hostAbi}\n" +
+                "Core Wine files passed manifest, SHA-256, ELF, and PE checks."
         } ?: (
-            "NO WINE RUNTIME PACKAGE INSTALLED\n" +
-                "Import a schema v2 ZIP containing x86_64 Wine, wineserver, wineboot.exe, and DXVK."
+            "WINE RUNTIME NOT INSTALLED\n" +
+                "Import one compatible Android/Box64 Wine runtime ZIP. DXVK is downloaded separately."
             )
-
+        val dxvkText = installedDxvk?.let {
+            "DXVK: official ${it.version} downloaded and checksum-verified."
+        } ?: installedRuntime?.let {
+            if (it.dxvkD3d11 != null && it.dxvkDxgi != null) {
+                "DXVK: bundled in the imported Wine runtime (${it.version})."
+            } else {
+                "DXVK: not installed yet. Use DOWNLOAD / UPDATE OFFICIAL DXVK."
+            }
+        } ?: "DXVK: not installed yet. Use DOWNLOAD / UPDATE OFFICIAL DXVK."
         val runtimeCard = TextView(this).apply {
             text = RuntimeExecutionManager.engineStatus(this@MainActivity) +
-                "\n\n" + runtimeText + "\n\n" + NativeBridge.status() +
+                "\n\n" + runtimeText +
+                "\n\nCOMPONENT MANAGER\nBox64: bundled inside this APK (ARM64)\n" +
+                dxvkText + "\nWine: imported separately\n\n" + NativeBridge.status() +
                 "\n\nDEVICE / VULKAN\n" + NativeBridge.device()
             textSize = 13f
             setTextColor(Color.rgb(255, 220, 150))
@@ -129,7 +140,8 @@ class MainActivity : Activity() {
 
         content.addView(actionButton("IMPORT WINDOWS EXE") { chooseExe() }, buttonParams())
         content.addView(actionButton("ADD GAME DATA FOLDER") { chooseFolder() }, buttonParams())
-        content.addView(actionButton("IMPORT WINE + DXVK RUNTIME (.ZIP)") { chooseRuntimePackage() }, buttonParams())
+        content.addView(actionButton("IMPORT WINE RUNTIME (.ZIP)") { chooseRuntimePackage() }, buttonParams())
+        content.addView(actionButton("DOWNLOAD / UPDATE OFFICIAL DXVK") { downloadOfficialDxvk() }, buttonParams())
         content.addView(actionButton("TEST BOX64 + WINE") { probeRuntime() }, buttonParams())
         content.addView(actionButton("SHOW / HIDE FLOATING CONTROLS") { toggleControllerOverlay() }, buttonParams())
         content.addView(actionButton("STOP RUNNING GAME") { stopRunningGame() }, buttonParams())
@@ -161,7 +173,7 @@ class MainActivity : Activity() {
         renderLibrary(list)
 
         val footer = TextView(this).apply {
-            text = "PCGameLauncherARM64 • v0.8.0\nAnalog-style movement, mouse-look and per-game input presets."
+            text = "PCGameLauncherARM64 • v0.9.0\nAutomatic official DXVK manager, bundled Box64 and Wine runtime import."
             textSize = 11f
             setTextColor(Color.rgb(120, 132, 153))
             gravity = Gravity.CENTER
@@ -275,6 +287,47 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun downloadOfficialDxvk() {
+        val progress = ProgressDialog.show(
+            this,
+            "Download DXVK resmi",
+            "Mengambil rilis terbaru dan memeriksa SHA-256 dari GitHub. Jangan tutup aplikasi.",
+            true,
+            false
+        )
+        Thread {
+            try {
+                var lastUiUpdate = 0L
+                val info = DxvkComponentManager.downloadLatest(filesDir) { downloaded, total ->
+                    if (downloaded - lastUiUpdate >= 512 * 1024L || downloaded == total) {
+                        lastUiUpdate = downloaded
+                        runOnUiThread {
+                            progress.setMessage(
+                                "Mengunduh DXVK ${downloaded / (1024 * 1024)} / ${total / (1024 * 1024)} MiB. Memeriksa SHA-256..."
+                            )
+                        }
+                    }
+                }
+                runOnUiThread {
+                    progress.dismiss()
+                    installedDxvk = info
+                    buildScreen()
+                    showMessage(
+                        "DXVK berhasil disiapkan",
+                        "Versi: ${info.version}\nSumber: rilis resmi doitsujin/dxvk\n\n" +
+                            "Checksum arsip diverifikasi terhadap metadata GitHub. Pasang DXVK dari kartu game setelah Wine prefix selesai dibuat. " +
+                            "Kompatibilitas rendering tetap bergantung pada driver Vulkan perangkat."
+                    )
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    progress.dismiss()
+                    showMessage("Download DXVK gagal", error.message ?: error.javaClass.simpleName)
+                }
+            }
+        }.start()
+    }
+
     private fun importRuntimePackage(uri: Uri) {
         val progress = ProgressDialog.show(
             this,
@@ -354,8 +407,16 @@ class MainActivity : Activity() {
 
     private fun installDxvk(game: GameEntry) {
         val runtime = installedRuntime
-        if (runtime == null) {
-            showMessage("Runtime belum tersedia", "Impor paket Wine + DXVK schema v2 terlebih dahulu.")
+        val downloaded = installedDxvk
+        val dxvkD3d11 = downloaded?.dxvkD3d11 ?: runtime?.dxvkD3d11
+        val dxvkDxgi = downloaded?.dxvkDxgi ?: runtime?.dxvkDxgi
+        val dxvkVersion = downloaded?.version ?: runtime?.version
+
+        if (dxvkD3d11 == null || dxvkDxgi == null || dxvkVersion == null) {
+            showMessage(
+                "DXVK belum tersedia",
+                "Tekan DOWNLOAD / UPDATE OFFICIAL DXVK sekali. Launcher akan mengunduh DLL x64 resmi dan memeriksa SHA-256 secara otomatis."
+            )
             return
         }
         val profile = try {
@@ -368,7 +429,9 @@ class MainActivity : Activity() {
             showMessage("Wine prefix belum siap", "Jalankan Initialize Wine prefix dahulu.")
             return
         }
-        runRuntimeTask("Install DXVK") { DxvkInstaller.install(runtime, profile) }
+        runRuntimeTask("Install DXVK $dxvkVersion") {
+            DxvkInstaller.install(dxvkD3d11, dxvkDxgi, dxvkVersion, profile)
+        }
     }
 
     private fun showGameSettings(game: GameEntry) {
@@ -701,7 +764,7 @@ class MainActivity : Activity() {
     private fun probeRuntime() {
         val runtime = installedRuntime
         if (runtime == null) {
-            showMessage("Runtime belum tersedia", "Impor paket Wine + DXVK schema v2 terlebih dahulu.")
+            showMessage("Runtime belum tersedia", "Impor paket Wine runtime schema v2 terlebih dahulu.")
             return
         }
         runRuntimeTask("Testing Box64 + Wine") {
@@ -712,7 +775,7 @@ class MainActivity : Activity() {
     private fun initializeWinePrefix(game: GameEntry) {
         val runtime = installedRuntime
         if (runtime == null) {
-            showMessage("Runtime belum tersedia", "Impor paket Wine + DXVK schema v2 terlebih dahulu.")
+            showMessage("Runtime belum tersedia", "Impor paket Wine runtime schema v2 terlebih dahulu.")
             return
         }
 
@@ -735,7 +798,7 @@ class MainActivity : Activity() {
 
     private fun requestGameLaunch(game: GameEntry) {
         if (installedRuntime == null) {
-            showMessage("Runtime belum tersedia", "Impor paket Wine + DXVK schema v2 terlebih dahulu.")
+            showMessage("Runtime belum tersedia", "Impor paket Wine runtime schema v2 terlebih dahulu.")
             return
         }
 
