@@ -1,6 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <windowsx.h>
+#include <algorithm>
 #include <cstdint>
 #include <string>
 
@@ -66,7 +67,7 @@ namespace {
         const int top = 102;
         const int gap = 8;
         const int barHeight = 30;
-        const int availableWidth = max(80, width - left * 2);
+        const int availableWidth = std::max(80, width - left * 2);
         for (unsigned index = 0; index < 8; ++index) {
             RECT bar{
                 left,
@@ -164,7 +165,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
     windowClass.style = CS_HREDRAW | CS_VREDRAW;
     windowClass.lpfnWndProc = windowProc;
     windowClass.hInstance = instance;
-    windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    windowClass.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
     windowClass.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
     windowClass.lpszClassName = className;
     if (!RegisterClassExW(&windowClass)) return 2;
