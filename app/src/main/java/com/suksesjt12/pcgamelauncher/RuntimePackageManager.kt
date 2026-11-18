@@ -25,8 +25,8 @@ object RuntimePackageManager {
         val wine64: File,
         val wineserver: File,
         val winebootExe: File,
-        val dxvkD3d11: File,
-        val dxvkDxgi: File,
+        val dxvkD3d11: File?,
+        val dxvkDxgi: File?,
         val libraryPaths: List<File>
     )
 
