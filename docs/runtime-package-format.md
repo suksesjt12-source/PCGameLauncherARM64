@@ -160,7 +160,7 @@ physical hardware is still required.
 - Game launch reports that the process started; it does not prove the game reached its main menu.
 - DXVK x64 DLL installation into Wine system32 and per-process native overrides are implemented. Actual DXVK/Vulkan rendering compatibility still requires device testing.
 - Vulkan device enumeration is not a DXVK rendering test or compatibility guarantee.
-- The Android-side XServer/SDL display lifecycle and complete PulseAudio service startup are not yet integrated. Runtime installation and a Wine process start do not prove visible game rendering or gameplay.
+- The launcher configures the Bionic rootfs environment paths used by Winlator Mali, including host `LD_LIBRARY_PATH`, `PATH`, `HOME`, XDG/fontconfig/Vulkan-wrapper paths, and Mali Box64 flags. The Android-side XServer/SDL display lifecycle and complete PulseAudio service startup are not yet integrated. Runtime installation and a Wine process start do not prove visible game rendering or gameplay.
 - SHA-256 detects changes relative to the manifest; it does not authenticate the publisher.
 - This project is not an EXE-to-APK converter.
 
