@@ -33,6 +33,7 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var uploadTestButton: Button
     private lateinit var clearFrameButton: Button
     private lateinit var win32TestButton: Button
+    private lateinit var coreDiagnosticsButton: Button
     private val displayBackend: PcglDisplayBackend = PcglEglSurfaceBackend()
 
     @Volatile private var displayReady = false
@@ -114,6 +115,12 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
             setTextColor(Color.rgb(205, 218, 237))
         }
         footer.addView(frameView)
+        coreDiagnosticsButton = Button(this).apply {
+            text = "RUN AUTOMATED CORE DISPLAY CHECKS"
+            setOnClickListener { runCoreDisplayDiagnostics() }
+        }
+        footer.addView(coreDiagnosticsButton)
+
         x11TestButton = Button(this).apply {
             text = "TEST X11 WINDOW + GAME FRAME PIPELINE"
             setOnClickListener { runX11ProtocolSelfTest() }
@@ -348,6 +355,103 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
             }
         }.apply {
             name = "PCGL-Win32-GUI-Display-Test"
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun runCoreDisplayDiagnostics() {
+        if (!displayReady || isFinishing || isDestroyed) {
+            statusView.text = "CORE DISPLAY DIAGNOSTICS\\nWait until the Android EGL Surface is ready."
+            return
+        }
+        if (x11TestRunning || frameTestRunning || win32TestRunning || pendingGameLaunchStarted ||
+            RuntimeExecutionManager.isGameRunning() || PcglX11DisplaySession.isRunning()
+        ) {
+            statusView.text = "CORE DISPLAY DIAGNOSTICS\\nStop other sessions or tests before starting."
+            return
+        }
+
+        x11TestRunning = true
+        coreDiagnosticsButton.isEnabled = false
+        x11TestButton.isEnabled = false
+        tcpX11TestButton.isEnabled = false
+        uploadTestButton.isEnabled = false
+        statusView.text = "CORE DISPLAY DIAGNOSTICS\\nChecking local X11, authenticated TCP and EGL frame upload..."
+        frameView.text = "This automated test does not launch a Windows game. Run the separate Win32 GUI test after these checks pass."
+
+        Thread {
+            val report = StringBuilder()
+            fun stage(value: String) {
+                runOnUiThread {
+                    if (!isDestroyed) statusView.text = "CORE DISPLAY DIAGNOSTICS\\n$value"
+                }
+            }
+            val frameSink: (PcglWindowFrame) -> Unit = { frame ->
+                // The renderer thread owns EGL; the X11 server only publishes its latest frame.
+                pendingX11Frame.set(frame)
+            }
+
+            stage("1/3 - AF_UNIX X11 protocol self-test")
+            val localResult = PcglX11ProtocolSelfTest.run(
+                File(filesDir, "pcgl/x11-protocol-test"),
+                frameSink
+            )
+            report.append("AF_UNIX X11: ").append(localResult.details).append("\\n\\n")
+
+            stage("2/3 - Authenticated loopback TCP X11 self-test")
+            val tcpResult = PcglX11TcpProtocolSelfTest.run(
+                File(filesDir, "pcgl/x11-tcp-protocol-test"),
+                frameSink
+            )
+            report.append("TCP X11: ").append(tcpResult.details).append("\\n\\n")
+
+            stage("3/3 - Android EGL frame upload")
+            val uploadPixels = ByteArray(64 * 64 * 4)
+            for (y in 0 until 64) {
+                for (x in 0 until 64) {
+                    val offset = (y * 64 + x) * 4
+                    val bright = ((x / 8) + (y / 8)) % 2 == 0
+                    uploadPixels[offset] = if (bright) 0xff.toByte() else 0x20
+                    uploadPixels[offset + 1] = if (bright) 0x40 else 0xc0.toByte()
+                    uploadPixels[offset + 2] = if (bright) 0xc0.toByte() else 0x40
+                    uploadPixels[offset + 3] = 0xff.toByte()
+                }
+            }
+            val uploadDone = CountDownLatch(1)
+            val uploadAccepted = java.util.concurrent.atomic.AtomicBoolean(false)
+            val testFrame = PcglWindowFrame(64, 64, uploadPixels)
+            renderHandler.post {
+                try {
+                    uploadAccepted.set(displayReady && !isDestroyed &&
+                        displayBackend.submitWindowFrame(testFrame))
+                } finally {
+                    uploadDone.countDown()
+                }
+            }
+            val uploadCompleted = uploadDone.await(3, TimeUnit.SECONDS)
+            val uploadPassed = uploadCompleted && uploadAccepted.get()
+            report.append("EGL frame upload: ")
+                .append(if (uploadPassed) "PASS: renderer accepted a 64x64 RGBA frame." else
+                    "FAIL: renderer did not accept a 64x64 RGBA frame within 3 seconds.")
+
+            val allPassed = localResult.success && tcpResult.success && uploadPassed
+            runOnUiThread {
+                x11TestRunning = false
+                if (isDestroyed) return@runOnUiThread
+                coreDiagnosticsButton.isEnabled = true
+                x11TestButton.isEnabled = true
+                tcpX11TestButton.isEnabled = true
+                uploadTestButton.isEnabled = true
+                statusView.text = if (allPassed) {
+                    "CORE DISPLAY DIAGNOSTICS\\nPASS: all three automated checks completed."
+                } else {
+                    "CORE DISPLAY DIAGNOSTICS\\nPARTIAL / FAILED: inspect the report below."
+                }
+                frameView.text = report.toString()
+            }
+        }.apply {
+            name = "PCGL-Core-Display-Diagnostics"
             isDaemon = true
             start()
         }
