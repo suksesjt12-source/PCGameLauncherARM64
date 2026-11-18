@@ -31,6 +31,7 @@ object RuntimeExecutionManager {
     private val gameProcessLock = Any()
     @Volatile private var activeGameProcess: Process? = null
     @Volatile private var activeGameLog: File? = null
+    @Volatile private var activeInputHelperProcess: Process? = null
     @Volatile private var lastGameExitCode: Int? = null
 
     fun isGameRunning(): Boolean = activeGameProcess?.isAlive == true
@@ -105,6 +106,14 @@ object RuntimeExecutionManager {
         command.add(runtime.wine64.absolutePath)
         command.add(targetExe.absolutePath)
         command.addAll(arguments)
+        val inputHelper = installInputHelper(context, profile)
+        val inputEndpoint = if (inputHelper != null) WineInputBridge.start() else null
+        var inputHelperProcess: Process? = null
+        var inputStatus = if (inputHelper == null) {
+            "Input helper tidak tersedia di build ini; game tetap diluncurkan tanpa overlay input."
+        } else {
+            "Input helper sedang disiapkan."
+        }
 
         return try {
             val builder = ProcessBuilder(command)
@@ -149,9 +158,35 @@ object RuntimeExecutionManager {
             }
 
             val process = builder.start()
+            if (inputHelper != null && inputEndpoint != null) {
+                try {
+                    val helperLog = File(logs, "pcgl-input-bridge.log")
+                    val helperCommand = listOf(
+                        engine.absolutePath,
+                        runtime.wine64.absolutePath,
+                        inputHelper.absolutePath,
+                        inputEndpoint.host,
+                        inputEndpoint.port.toString(),
+                        inputEndpoint.token
+                    )
+                    val helperBuilder = ProcessBuilder(helperCommand)
+                        .directory(inputHelper.parentFile)
+                        .redirectErrorStream(true)
+                        .redirectOutput(helperLog)
+                    helperBuilder.environment().putAll(builder.environment())
+                    inputHelperProcess = helperBuilder.start()
+                    inputStatus = "Wine keyboard/mouse helper launched; waiting for authenticated loopback connection."
+                } catch (error: Exception) {
+                    WineInputBridge.stop()
+                    inputStatus = "Input helper gagal dimulai: ${error.message ?: error.javaClass.simpleName}"
+                }
+            } else {
+                WineInputBridge.stop()
+            }
             synchronized(gameProcessLock) {
                 activeGameProcess = process
                 activeGameLog = logFile
+                activeInputHelperProcess = inputHelperProcess
                 lastGameExitCode = null
             }
 
@@ -161,7 +196,14 @@ object RuntimeExecutionManager {
                     synchronized(gameProcessLock) {
                         lastGameExitCode = exitCode
                         if (activeGameProcess === process) activeGameProcess = null
+                        activeInputHelperProcess?.let { helper ->
+                            if (helper.isAlive) helper.destroy()
+                            if (helper.isAlive) helper.destroyForcibly()
+                        }
+                        activeInputHelperProcess = null
                     }
+                    WineInputBridge.stop()
+                    ControllerOverlayManager.hide()
                 } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
                 }
@@ -175,9 +217,11 @@ object RuntimeExecutionManager {
                 true,
                 System.currentTimeMillis().toString(),
                 logFile,
-                "Box64 process berhasil dimulai. Ini belum menjamin game berhasil masuk ke menu."
+                "Box64/Wine process berhasil dimulai. Ini belum menjamin game berhasil masuk ke menu.\n$inputStatus\nInput ini memetakan tombol virtual ke keyboard/mouse Windows; bukan perangkat XInput/SDL."
             )
         } catch (error: IOException) {
+            WineInputBridge.stop()
+            inputHelperProcess?.let { if (it.isAlive) it.destroyForcibly() }
             LaunchResult(
                 false,
                 null,
@@ -185,6 +229,8 @@ object RuntimeExecutionManager {
                 "Gagal memulai proses Box64/Wine: ${error.message ?: "I/O error"}"
             )
         } catch (error: Exception) {
+            WineInputBridge.stop()
+            inputHelperProcess?.let { if (it.isAlive) it.destroyForcibly() }
             LaunchResult(false, null, logFile, error.message ?: error.javaClass.simpleName)
         }
     }
@@ -243,6 +289,12 @@ object RuntimeExecutionManager {
                 synchronized(gameProcessLock) {
                     if (activeGameProcess === process) activeGameProcess = null
                 }
+            }
+            if (stopped) {
+                WineInputBridge.stop()
+                activeInputHelperProcess?.let { if (it.isAlive) it.destroyForcibly() }
+                activeInputHelperProcess = null
+                ControllerOverlayManager.hide()
             }
             Result(stopped, "Stop game", null, if (stopped) "Permintaan penghentian dikirim." else "Proses belum berhenti.")
         } catch (error: Exception) {
@@ -397,6 +449,45 @@ object RuntimeExecutionManager {
                 null,
                 error.message ?: error.javaClass.simpleName
             )
+        }
+    }
+
+    private fun installInputHelper(
+        context: Context,
+        profile: GameContainerManager.Profile
+    ): File? {
+        return try {
+            val driveC = File(profile.directory, "drive_c").canonicalFile
+            val destination = File(driveC, "PCGL/pcgl-input-bridge.exe").canonicalFile
+            require(destination.path.startsWith(driveC.path + File.separator))
+            if (destination.isFile && destination.length() > 1024L) {
+                val existingHeader = destination.inputStream().use { input -> ByteArray(2).also { input.read(it) } }
+                if (existingHeader[0] == 'M'.code.toByte() && existingHeader[1] == 'Z'.code.toByte()) {
+                    return destination
+                }
+            }
+            val parent = destination.parentFile ?: return null
+            if (!parent.exists() && !parent.mkdirs()) return null
+            val temporary = File(parent, "pcgl-input-bridge.exe.tmp")
+            context.assets.open("pcgl-input-bridge.exe").use { input ->
+                temporary.outputStream().buffered().use { output -> input.copyTo(output) }
+            }
+            val header = temporary.inputStream().use { input -> ByteArray(2).also { input.read(it) } }
+            if (temporary.length() < 1024L || header[0] != 'M'.code.toByte() || header[1] != 'Z'.code.toByte()) {
+                temporary.delete()
+                return null
+            }
+            if (destination.exists() && !destination.delete()) {
+                temporary.delete()
+                return null
+            }
+            if (!temporary.renameTo(destination)) {
+                temporary.delete()
+                return null
+            }
+            destination
+        } catch (_: Exception) {
+            null
         }
     }
 

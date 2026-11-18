@@ -53,6 +53,11 @@ class MainActivity : Activity() {
         super.onResume()
         performanceHandler.removeCallbacks(performanceRefresh)
         performanceRefresh.run()
+        if (RuntimeExecutionManager.isGameRunning()) {
+            if (android.provider.Settings.canDrawOverlays(this)) ControllerOverlayManager.show(this)
+        } else {
+            ControllerOverlayManager.hide()
+        }
     }
 
     override fun onPause() {
@@ -126,6 +131,7 @@ class MainActivity : Activity() {
         content.addView(actionButton("ADD GAME DATA FOLDER") { chooseFolder() }, buttonParams())
         content.addView(actionButton("IMPORT WINE + DXVK RUNTIME (.ZIP)") { chooseRuntimePackage() }, buttonParams())
         content.addView(actionButton("TEST BOX64 + WINE") { probeRuntime() }, buttonParams())
+        content.addView(actionButton("SHOW / HIDE FLOATING CONTROLS") { toggleControllerOverlay() }, buttonParams())
         content.addView(actionButton("STOP RUNNING GAME") { stopRunningGame() }, buttonParams())
 
         val processStatus = TextView(this).apply {
@@ -155,7 +161,7 @@ class MainActivity : Activity() {
         renderLibrary(list)
 
         val footer = TextView(this).apply {
-            text = "PCGameLauncherARM64 • v0.6.0\nPer-game DXVK settings, audio hints, thermal monitor and controller layout preview."
+            text = "PCGameLauncherARM64 • v0.7.0\nWine keyboard/mouse input bridge, floating touch controls and per-game profiles."
             textSize = 11f
             setTextColor(Color.rgb(120, 132, 153))
             gravity = Gravity.CENTER
@@ -590,7 +596,7 @@ class MainActivity : Activity() {
         form.addView(previewRow)
         form.addView(previewStatus)
         form.addView(TextView(this).apply {
-            text = "This is a layout and button-response preview only. Touch/controller events are not yet forwarded into Wine; that requires a connected Wine/SDL input bridge."
+            text = "The floating overlay maps D-pad and face buttons to keyboard keys through the Wine input helper. It does not emulate XInput or SDL gamepad devices."
             textSize = 11f
             setTextColor(Color.rgb(210, 180, 130))
             setPadding(0, dp(6), 0, dp(12))
@@ -620,7 +626,7 @@ class MainActivity : Activity() {
                     dialog.dismiss()
                     showMessage(
                         "Settings saved",
-                        "Game profile: ${game.name}\nResolution preference: ${settings.resolution}\nDXVK FPS cap: ${if (settings.frameLimit == 0) "Uncapped" else settings.frameLimit}\nVSync: ${if (settings.vsync) "On" else "Off"}\nAudio: ${settings.audioMode}\nController layout: ${settings.controllerLayout}\n\nDXVK options apply only when DXVK is installed. Controller controls remain preview-only until the input bridge is implemented."
+                        "Game profile: ${game.name}\nResolution preference: ${settings.resolution}\nDXVK FPS cap: ${if (settings.frameLimit == 0) "Uncapped" else settings.frameLimit}\nVSync: ${if (settings.vsync) "On" else "Off"}\nAudio: ${settings.audioMode}\nController layout: ${settings.controllerLayout}\n\nDXVK options apply only when DXVK is installed. Floating controls send mapped keyboard keys to the focused Wine desktop when the input helper is connected."
                     )
                 } catch (error: Exception) {
                     showMessage("Settings gagal disimpan", error.message ?: "Kesalahan konfigurasi.")
@@ -628,6 +634,33 @@ class MainActivity : Activity() {
             }
         }
         dialog.show()
+    }
+
+    private fun toggleControllerOverlay() {
+        if (!RuntimeExecutionManager.isGameRunning()) {
+            showMessage("Game belum berjalan", "Mulai game melalui Wine terlebih dahulu untuk mengaktifkan kontrol mengambang.")
+            return
+        }
+        if (!android.provider.Settings.canDrawOverlays(this)) {
+            requestOverlayPermission()
+            return
+        }
+        if (ControllerOverlayManager.isShowing()) ControllerOverlayManager.hide()
+        else if (!ControllerOverlayManager.show(this)) {
+            showMessage("Overlay gagal ditampilkan", "Android tidak dapat membuat jendela kontrol mengambang.")
+        }
+    }
+
+    private fun requestOverlayPermission() {
+        val intent = Intent(
+            android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:$packageName")
+        )
+        try {
+            startActivity(intent)
+        } catch (error: Exception) {
+            showMessage("Pengaturan overlay tidak tersedia", error.message ?: "Buka pengaturan izin tampil di atas aplikasi secara manual.")
+        }
     }
 
     private fun probeRuntime() {
@@ -798,6 +831,16 @@ class MainActivity : Activity() {
                     "Log: ${launch.logFile?.absolutePath}\n\n" +
                     launch.message
 
+                if (android.provider.Settings.canDrawOverlays(this)) {
+                    ControllerOverlayManager.show(this)
+                } else {
+                    AlertDialog.Builder(this)
+                        .setTitle("Aktifkan kontrol mengambang")
+                        .setMessage("Untuk memakai tombol virtual di atas jendela game, izinkan PC Game Launcher tampil di atas aplikasi lain.")
+                        .setNegativeButton("Nanti", null)
+                        .setPositiveButton("Buka pengaturan") { _, _ -> requestOverlayPermission() }
+                        .show()
+                }
                 AlertDialog.Builder(this)
                     .setTitle("Launch request dikirim")
                     .setMessage(details)

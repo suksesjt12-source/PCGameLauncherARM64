@@ -54,7 +54,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y cmake make python3 libzydis-dev p7zip-full
+          sudo apt-get install -y cmake make python3 libzydis-dev p7zip-full g++-mingw-w64-x86-64
 
           git clone https://github.com/termux/termux-docker.git third_party/termux-docker
           git -C third_party/termux-docker checkout 148b93d989cbc572719e050135b3e13f115f2a8e~1
@@ -87,6 +87,18 @@ jobs:
           mkdir -p app/src/main/jniLibs/arm64-v8a
           install -m 0755 "$BOX64_BIN" app/src/main/jniLibs/arm64-v8a/libbox64.so
 
+      - name: Build Windows input helper for Wine
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p app/src/main/assets
+          x86_64-w64-mingw32-g++ -std=c++17 -O2 -s -static -static-libgcc -static-libstdc++ \
+            tools/pcgl-input-bridge.cpp -lws2_32 -luser32 \
+            -o app/src/main/assets/pcgl-input-bridge.exe
+          file app/src/main/assets/pcgl-input-bridge.exe
+          x86_64-w64-mingw32-objdump -f app/src/main/assets/pcgl-input-bridge.exe | grep -q 'pei-x86-64'
+          test -s app/src/main/assets/pcgl-input-bridge.exe
+
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
 
@@ -99,6 +111,9 @@ jobs:
           test -s .verify/libbox64.so
           file .verify/libbox64.so
           readelf -h .verify/libbox64.so | grep -q "AArch64"
+          unzip -p app/build/outputs/apk/debug/app-debug.apk assets/pcgl-input-bridge.exe > .verify/pcgl-input-bridge.exe
+          test -s .verify/pcgl-input-bridge.exe
+          file .verify/pcgl-input-bridge.exe | grep -q 'PE32+.*x86-64'
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
