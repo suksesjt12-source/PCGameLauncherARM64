@@ -27,7 +27,7 @@ public class ClientSocket {
         return hasAncillaryFds() ? ancillaryFds.poll() : -1;
     }
 
-    @Keep
+    
     public void addAncillaryFd(int ancillaryFd) {
         ancillaryFds.add(ancillaryFd);
     }
