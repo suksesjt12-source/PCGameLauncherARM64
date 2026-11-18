@@ -16,7 +16,7 @@ This is not a renamed Winlator APK. The project uses interoperable runtime compo
 - Vulkan device and queue capability probe.
 - PCGL-owned Android Surface/EGL session and GLES diagnostic renderer.
 - PCGL-namespaced X11 AF_UNIX and loopback TCP transports; TCP mode binds to 127.0.0.1 and requires MIT-MAGIC-COOKIE-1 authentication.
-- X11 11.0 setup, Xauthority generation, and an initial software window/drawable implementation (CreateWindow/MapWindow, GC, ZPixmap PutImage/GetImage, CopyArea, PolyFillRectangle, geometry/tree queries, and selected core events).
+- X11 11.0 setup, fixed core predefined atoms and a server-wide dynamic atom registry, Xauthority generation, and an initial software window/drawable implementation (CreateWindow/MapWindow, GC, ZPixmap PutImage/GetImage, CopyArea, PolyFillRectangle, geometry/tree queries, and selected core events).
 - RGBA8888 software framebuffer composition routed to the Android EGL texture renderer.
 - Launcher-to-display Activity handoff; the game launch path starts an authenticated X11 display session before passing DISPLAY/XAUTHORITY to Wine.
 - Device temperature, memory, and process-memory monitor.

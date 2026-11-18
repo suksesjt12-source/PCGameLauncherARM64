@@ -20,6 +20,10 @@ The connector is adapted from the MIT-licensed XConnector implementation in [Gun
 
 TCP mode is restricted to loopback and requires a 16-byte MIT-MAGIC-COOKIE-1 value. PcglXAuthority writes an owner-only Xauthority record into the selected per-game workspace. The server rejects empty, incorrect, or unexpected authorization records. The session manager returns the DISPLAY endpoint and Xauthority path only after the listener is active.
 
+## Stage 4.2a — shared X11 atom registry
+
+The protocol server now uses one server-wide atom registry for every connected client. The 68 X11 core predefined atoms are exposed with their fixed protocol IDs (1–68); dynamically interned atoms start at 69. InternAtom and GetAtomName use the same bidirectional registry, so a client can resolve an atom created by another client. This improves core protocol compatibility but does not imply complete multi-client window/resource ownership.
+
 ## Stage 4.2 — X11 protocol bootstrap
 
 PCGL parses X11 byte order and the X11 11.0 setup exchange, returns a 24-bit TrueColor root screen, and bounds input/request memory. TCP mode verifies MIT-MAGIC-COOKIE-1 using a constant-time byte comparison; AF_UNIX test mode accepts only empty authorization records.

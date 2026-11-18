@@ -36,16 +36,14 @@ class PcglX11ProtocolServer(
         var setupComplete: Boolean = false,
         var sequence: Int = 0,
         var pending: ByteArray = ByteArray(0),
-        val atomsByName: MutableMap<String, Int> = HashMap(),
-        val namesByAtom: MutableMap<Int, String> = HashMap(),
         val eventMasks: MutableMap<Int, Int> = HashMap(),
         val properties: MutableMap<Int, MutableMap<Int, XProperty>> = HashMap(),
         var focusedWindow: Int = PcglX11SetupCodec.ROOT_WINDOW_ID,
-        var revertTo: Int = 1,
-        var nextAtom: Int = 1
+        var revertTo: Int = 1
     )
 
     private val framebuffer = PcglX11Framebuffer(screenWidthPx, screenHeightPx, frameSink)
+    private val atomRegistry = PcglX11AtomRegistry()
     private val authCookie: ByteArray? = if (tcpPort != null) {
         ByteArray(16).also { SecureRandom().nextBytes(it) }
     } else null
@@ -713,14 +711,9 @@ class PcglX11ProtocolServer(
         if (request.size != expectedLength) return buildError(state, BAD_LENGTH, nameLength, 16)
         val name = String(request, 8, nameLength, Charsets.ISO_8859_1)
         val onlyIfExists = request[1].toInt() != 0
-        var atom = state.atomsByName[name]
-        if (atom == null && !onlyIfExists) {
-            atom = state.nextAtom++
-            state.atomsByName[name] = atom
-            state.namesByAtom[atom] = name
-        }
+        val atom = atomRegistry.intern(name, onlyIfExists)
         val output = replyBuffer(state.byteOrder, 32, 1, 0, state.sequence, 0)
-        output.putInt(atom ?: 0)
+        output.putInt(atom)
         repeat(20) { output.put(0) }
         return output.array()
     }
@@ -728,7 +721,7 @@ class PcglX11ProtocolServer(
     private fun getAtomName(state: ClientState, request: ByteArray): ByteArray {
         if (request.size != 8) return buildError(state, BAD_LENGTH, 0, 17)
         val atom = readU32(request, 4, state.byteOrder)
-        val name = state.namesByAtom[atom] ?: return buildError(state, BAD_ATOM, atom, 17)
+        val name = atomRegistry.name(atom) ?: return buildError(state, BAD_ATOM, atom, 17)
         val nameBytes = name.toByteArray(Charsets.ISO_8859_1)
         val paddedLength = PcglX11SetupCodec.align4(nameBytes.size)
         val output = replyBuffer(state.byteOrder, 32 + paddedLength, 1, 0, state.sequence, paddedLength / 4)
