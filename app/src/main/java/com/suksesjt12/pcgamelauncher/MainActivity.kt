@@ -46,7 +46,7 @@ class MainActivity : Activity() {
         window.statusBarColor = Color.rgb(12, 15, 23)
         window.navigationBarColor = Color.rgb(12, 15, 23)
         loadLibrary()
-        installedRuntime = RuntimePackageManager.findInstalled(filesDir)
+        installedRuntime = RuntimeBootstrapManager.findInstalled(filesDir) ?: RuntimePackageManager.findInstalled(filesDir)
         installedDxvk = DxvkComponentManager.findInstalled(filesDir)
         buildScreen()
     }
@@ -93,11 +93,15 @@ class MainActivity : Activity() {
         content.addView(subtitle)
 
         val runtimeText = installedRuntime?.let {
-            "WINE RUNTIME INSTALLED\n${it.name} (${it.version}) • ${it.hostAbi}\n" +
-                "Core Wine files passed manifest, SHA-256, ELF, and PE checks."
+            val source = if (RuntimeBootstrapManager.isManaged(it)) {
+                "Winlator Mali Bionic rootfs + Proton x86_64; both archives passed pinned SHA-256 checks."
+            } else {
+                "Legacy runtime package passed manifest, SHA-256, ELF, and PE checks."
+            }
+            "WINE RUNTIME INSTALLED\n${it.name} (${it.version}) • ${it.hostAbi}\n$source"
         } ?: (
             "WINE RUNTIME NOT INSTALLED\n" +
-                "Import one compatible Android/Box64 Wine runtime ZIP. DXVK is downloaded separately."
+                "Install the base system and Wine runtime directly inside this app. No ZIP import is required."
             )
         val dxvkText = installedDxvk?.let {
             "DXVK: official ${it.version} downloaded and checksum-verified."
@@ -112,8 +116,9 @@ class MainActivity : Activity() {
             text = RuntimeExecutionManager.engineStatus(this@MainActivity) +
                 "\n\n" + runtimeText +
                 "\n\nCOMPONENT MANAGER\nBox64: bundled inside this APK (ARM64)\n" +
-                dxvkText + "\nWine: imported separately\n\n" + NativeBridge.status() +
-                "\n\nDEVICE / VULKAN\n" + NativeBridge.device()
+                dxvkText + "\nWine: managed by the in-app runtime installer\n" +
+                "Display backend: XServer/SDL integration is still pending; installation alone does not guarantee visible game output.\n\n" +
+                NativeBridge.status() + "\n\nDEVICE / VULKAN\n" + NativeBridge.device()
             textSize = 13f
             setTextColor(Color.rgb(255, 220, 150))
             setBackgroundColor(Color.rgb(43, 36, 25))
@@ -140,7 +145,9 @@ class MainActivity : Activity() {
 
         content.addView(actionButton("IMPORT WINDOWS EXE") { chooseExe() }, buttonParams())
         content.addView(actionButton("ADD GAME DATA FOLDER") { chooseFolder() }, buttonParams())
-        content.addView(actionButton("IMPORT WINE RUNTIME (.ZIP)") { chooseRuntimePackage() }, buttonParams())
+        content.addView(actionButton(
+            if (installedRuntime == null) "INSTALL RUNTIME COMPONENTS AUTOMATICALLY" else "VERIFY INSTALLED RUNTIME"
+        ) { installRuntimeComponents() }, buttonParams())
         content.addView(actionButton("DOWNLOAD / UPDATE OFFICIAL DXVK") { downloadOfficialDxvk() }, buttonParams())
         content.addView(actionButton("TEST BOX64 + WINE") { probeRuntime() }, buttonParams())
         content.addView(actionButton("SHOW / HIDE FLOATING CONTROLS") { toggleControllerOverlay() }, buttonParams())
@@ -285,6 +292,54 @@ class MainActivity : Activity() {
             }
             REQUEST_RUNTIME -> importRuntimePackage(uri)
         }
+    }
+
+    private fun installRuntimeComponents() {
+        val progress = ProgressDialog(this).apply {
+            setTitle("Install runtime components")
+            setMessage("Menyiapkan unduhan sistem dasar dan Wine...")
+            setProgressStyle(ProgressDialog.STYLE_HORIZONTAL)
+            max = 100
+            isIndeterminate = true
+            setCancelable(false)
+            show()
+        }
+
+        Thread {
+            try {
+                val info = RuntimeBootstrapManager.install(filesDir) { update ->
+                    runOnUiThread {
+                        progress.setMessage(update.stage)
+                        if (update.totalBytes > 0L) {
+                            progress.isIndeterminate = false
+                            progress.progress = ((update.completedBytes * 100L) / update.totalBytes)
+                                .toInt().coerceIn(0, 100)
+                        } else {
+                            progress.isIndeterminate = true
+                        }
+                    }
+                }
+                runOnUiThread {
+                    progress.dismiss()
+                    installedRuntime = info
+                    buildScreen()
+                    showMessage(
+                        "Komponen dasar berhasil dipasang",
+                        "${info.name} ${info.version} sudah terpasang dan file Wine telah diperiksa.\n\n" +
+                            "Box64 tersedia di APK. DXVK tetap opsional dan dapat diunduh dari pengelola komponen.\n\n" +
+                            "Catatan: backend tampilan XServer/SDL belum diintegrasikan ke launcher ini, jadi pemasangan runtime belum menjamin game tampil atau bisa dimainkan."
+                    )
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    progress.dismiss()
+                    showMessage(
+                        "Pemasangan runtime gagal",
+                        error.message ?: error.javaClass.simpleName
+                    )
+                }
+            }
+        }.start()
     }
 
     private fun downloadOfficialDxvk() {
@@ -764,7 +819,7 @@ class MainActivity : Activity() {
     private fun probeRuntime() {
         val runtime = installedRuntime
         if (runtime == null) {
-            showMessage("Runtime belum tersedia", "Impor paket Wine runtime schema v2 terlebih dahulu.")
+            showMessage("Runtime belum tersedia", "Tekan INSTALL RUNTIME COMPONENTS AUTOMATICALLY terlebih dahulu.")
             return
         }
         runRuntimeTask("Testing Box64 + Wine") {
