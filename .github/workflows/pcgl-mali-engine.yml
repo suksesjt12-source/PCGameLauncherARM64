@@ -77,18 +77,31 @@ jobs:
                   raise SystemExit(f"Expected exactly one branding target {old!r}; found {count}")
               source = source.replace(old, new, 1)
 
-          debug_block = """        debug {
-              minifyEnabled false
-              signingConfig signingConfigs.debug
-          }"""
-          debug_replacement = """        debug {
-                  minifyEnabled false
-                  applicationIdSuffix ".engine"
-                  signingConfig signingConfigs.debug
-              }"""
-          if source.count(debug_block) != 1:
-              raise SystemExit("Could not uniquely locate the debug build type.")
-          source = source.replace(debug_block, debug_replacement, 1)
+          lines = source.splitlines()
+          matched = []
+          for index, line in enumerate(lines):
+              if line.strip() == "debug {":
+                  expected = [
+                      "minifyEnabled false",
+                      "signingConfig signingConfigs.debug",
+                      "}",
+                  ]
+                  actual = [item.strip() for item in lines[index + 1:index + 4]]
+                  if actual == expected:
+                      matched.append(index)
+
+          if len(matched) != 1:
+              raise SystemExit(f"Expected one debug build type block; found {len(matched)}")
+
+          index = matched[0]
+          lines[index:index + 4] = [
+              "        debug {",
+              "            minifyEnabled false",
+              '            applicationIdSuffix ".engine"',
+              "            signingConfig signingConfigs.debug",
+              "        }",
+          ]
+          source = "\\n".join(lines) + "\\n"
           path.write_text(source, encoding="utf-8")
           PY
           chmod +x ./gradlew
