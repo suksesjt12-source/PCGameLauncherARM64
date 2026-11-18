@@ -44,7 +44,7 @@ The repository now also includes a separate workflow that builds the complete Wi
 2. Run **PC Game Launcher Mali Engine**.
 3. Download the `PCGameLauncher-Mali-Engine-debug` artifact after the run succeeds.
 
-This is a separate companion APK with package ID `com.suksesjt12.pcgamelauncher.engine` so it does not overwrite the existing lightweight launcher or its saved data. It is an initial engine-integration milestone, not yet a merged launcher: game entries and containers are not automatically shared between the two apps. The engine build bundles the upstream base image and still needs first-launch setup and testing on a real Helio G100/Mali device. See [docs/winlator-mali-engine.md](docs/winlator-mali-engine.md).
+This is a separate companion APK with package ID `com.suksesjt12.pcgamelauncher.engine` so it does not overwrite the existing lightweight launcher or its saved data. The latest lightweight launcher also has an **OPEN FULL MALI GRAPHICS ENGINE** handoff button. It is an initial engine-integration milestone, not yet a merged launcher: game entries and containers are not automatically shared between the two apps. The engine build bundles the upstream base image and still needs first-launch setup and testing on a real Helio G100/Mali device. See [docs/winlator-mali-engine.md](docs/winlator-mali-engine.md).
 
 ## Current limitations
 
