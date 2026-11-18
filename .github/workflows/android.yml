@@ -103,6 +103,13 @@ jobs:
           x86_64-w64-mingw32-objdump -f app/src/main/assets/pcgl-input-bridge.exe | grep -q 'pei-x86-64'
           test -s app/src/main/assets/pcgl-input-bridge.exe
 
+          x86_64-w64-mingw32-g++ -std=c++17 -O2 -s -static -static-libgcc -static-libstdc++ \
+            -mwindows tools/pcgl-display-test.cpp -lgdi32 -luser32 \
+            -o app/src/main/assets/pcgl-display-test.exe
+          file app/src/main/assets/pcgl-display-test.exe
+          x86_64-w64-mingw32-objdump -f app/src/main/assets/pcgl-display-test.exe | grep -q 'pei-x86-64'
+          test -s app/src/main/assets/pcgl-display-test.exe
+
       - name: Run X11 protocol codec unit tests and build debug APK
         run: gradle --no-daemon testDebugUnitTest assembleDebug
 
@@ -118,6 +125,9 @@ jobs:
           unzip -p app/build/outputs/apk/debug/app-debug.apk assets/pcgl-input-bridge.exe > .verify/pcgl-input-bridge.exe
           test -s .verify/pcgl-input-bridge.exe
           file .verify/pcgl-input-bridge.exe | grep -q 'PE32+.*x86-64'
+          unzip -p app/build/outputs/apk/debug/app-debug.apk assets/pcgl-display-test.exe > .verify/pcgl-display-test.exe
+          test -s .verify/pcgl-display-test.exe
+          file .verify/pcgl-display-test.exe | grep -q 'PE32+.*x86-64'
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
