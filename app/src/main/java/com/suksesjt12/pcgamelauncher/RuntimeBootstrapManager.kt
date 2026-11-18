@@ -164,6 +164,13 @@ object RuntimeBootstrapManager {
     }
 
     private fun createRuntimeInfo(imageFs: File): RuntimePackageManager.RuntimeInfo {
+        val requiredRootfsDirectories = listOf("usr/bin", "usr/lib", "usr/share", "usr/etc", "home")
+        val missingRootfsDirectories = requiredRootfsDirectories
+            .filter { !File(imageFs, it).isDirectory }
+        if (missingRootfsDirectories.isNotEmpty()) {
+            error("Root filesystem Winlator Mali tidak lengkap: ${missingRootfsDirectories.joinToString()}")
+        }
+
         val wineRoot = File(imageFs, "opt/$WINE_VERSION")
         if (!wineRoot.isDirectory) error("Direktori Proton tidak ditemukan.")
 
