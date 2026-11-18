@@ -150,6 +150,9 @@ class MainActivity : Activity() {
         ) { installRuntimeComponents() }, buttonParams())
         content.addView(actionButton("DOWNLOAD / UPDATE OFFICIAL DXVK") { downloadOfficialDxvk() }, buttonParams())
         content.addView(actionButton("TEST BOX64 + WINE") { probeRuntime() }, buttonParams())
+        content.addView(actionButton("TEST PCGL NATIVE DISPLAY") {
+            startActivity(Intent(this, DisplayTestActivity::class.java))
+        }, buttonParams())
         content.addView(actionButton("SHOW / HIDE FLOATING CONTROLS") { toggleControllerOverlay() }, buttonParams())
         content.addView(actionButton("STOP RUNNING GAME") { stopRunningGame() }, buttonParams())
 
