@@ -32,6 +32,7 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var stopX11SessionButton: Button
     private lateinit var uploadTestButton: Button
     private lateinit var clearFrameButton: Button
+    private lateinit var win32TestButton: Button
     private val displayBackend: PcglDisplayBackend = PcglEglSurfaceBackend()
 
     @Volatile private var displayReady = false
@@ -39,6 +40,7 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
     @Volatile private var surfaceAvailable = false
     @Volatile private var x11TestRunning = false
     @Volatile private var frameTestRunning = false
+    @Volatile private var win32TestRunning = false
     private var frameIndex = 0L
     @Volatile private var surfaceWidth = 1280
     @Volatile private var surfaceHeight = 720
@@ -142,6 +144,12 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
         }
         footer.addView(uploadTestButton)
 
+        win32TestButton = Button(this).apply {
+            text = "RUN BUNDLED WIN32 GUI TEST"
+            setOnClickListener { runBundledWin32GuiTest() }
+        }
+        footer.addView(win32TestButton)
+
         clearFrameButton = Button(this).apply {
             text = "CLEAR FRAME / SHOW DIAGNOSTIC"
             setOnClickListener {
@@ -179,10 +187,11 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
             } else {
                 pendingGameLaunchStarted = false
                 ControllerOverlayManager.hide()
+                win32TestButton.isEnabled = true
                 statusView.text = "GAME PROCESS EXITED\\nExit code: " +
                     (RuntimeExecutionManager.lastGameExitCode()?.toString() ?: "unknown") +
                     "\\nCheck the per-game log for the Wine/X11 result."
-                frameView.text = "X11 display session stopped after the game process exited."
+                frameView.text = "X11 display session stopped after the game process exited. The exit code does not prove that a visible window was created."
             }
         }
     }
@@ -275,6 +284,70 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
             }
         }.apply {
             name = "PCGL-Authenticated-Game-Launch"
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun runBundledWin32GuiTest() {
+        if (!displayReady || isFinishing || isDestroyed) {
+            statusView.text = "WIN32 GUI TEST\nWait until the Android EGL Surface is ready."
+            return
+        }
+        if (win32TestRunning || pendingGameLaunchStarted ||
+            RuntimeExecutionManager.isGameRunning() || x11TestRunning || frameTestRunning
+        ) {
+            statusView.text = "WIN32 GUI TEST\nAnother game or diagnostic test is already running."
+            return
+        }
+        if (PcglX11DisplaySession.isRunning()) {
+            statusView.text = "WIN32 GUI TEST\nStop the existing X11 session before starting this test."
+            return
+        }
+
+        win32TestRunning = true
+        win32TestButton.isEnabled = false
+        statusView.text = "WIN32 GUI TEST\nPreparing Wine prefix and authenticated X11 display..."
+        frameView.text = "This test launches the bundled GDI test window through Box64/Wine. Process start alone does not confirm visible rendering."
+
+        Thread {
+            val result = PcglWin32DisplayTestRunner.run(
+                context = applicationContext,
+                width = surfaceWidth,
+                height = surfaceHeight,
+                onStage = { stage ->
+                    runOnUiThread {
+                        if (!isDestroyed) statusView.text = "WIN32 GUI TEST\n$stage"
+                    }
+                },
+                frameSink = { frame -> pendingX11Frame.set(frame) }
+            )
+
+            runOnUiThread {
+                win32TestRunning = false
+                if (isDestroyed) return@runOnUiThread
+                if (!result.success) {
+                    win32TestButton.isEnabled = true
+                    PcglX11DisplaySession.stop()
+                    pendingX11Frame.set(null)
+                    statusView.text = "WIN32 GUI TEST FAILED\n\${result.message}"
+                    frameView.text = result.logFile?.absolutePath ?: "No test log was created."
+                    return@runOnUiThread
+                }
+
+                pendingGameLaunchStarted = true
+                statusView.text = "WIN32 GUI TEST PROCESS STARTED\n\${result.message}"
+                frameView.text = "Log: \${result.logFile?.absolutePath ?: "not available"}\nObserve the display area for the PCGL test window. A running process is not proof that X11 accepted or displayed the window."
+                if (android.provider.Settings.canDrawOverlays(this)) {
+                    ControllerOverlayManager.show(this, RuntimeExecutionManager.controllerSettings())
+                } else {
+                    frameView.append("\nAllow display-over-other-apps to use the touch controls.")
+                }
+                uiHandler.removeCallbacks(gameStatusPoll)
+                uiHandler.postDelayed(gameStatusPoll, 1000L)
+            }
+        }.apply {
+            name = "PCGL-Win32-GUI-Display-Test"
             isDaemon = true
             start()
         }

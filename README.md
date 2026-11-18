@@ -18,6 +18,7 @@ This is not a renamed Winlator APK. The project uses interoperable runtime compo
 - PCGL-namespaced X11 AF_UNIX and loopback TCP transports; TCP mode binds to 127.0.0.1 and requires MIT-MAGIC-COOKIE-1 authentication.
 - X11 11.0 setup, fixed core predefined atoms, a server-wide dynamic atom registry and shared window properties, Xauthority generation, and an initial software window/drawable implementation (CreateWindow/MapWindow, GC, ZPixmap PutImage/GetImage, CopyArea, PolyFillRectangle, geometry/tree queries, and selected core events).
 - RGBA8888 software framebuffer composition routed to the Android EGL texture renderer.
+- Bundled Win32 GDI display-test executable with an in-app Wine/X11 launch action on the native display diagnostic screen.
 - Launcher-to-display Activity handoff; the game launch path starts an authenticated X11 display session before passing DISPLAY/XAUTHORITY to Wine.
 - Device temperature, memory, and process-memory monitor.
 - Per-game virtual keyboard/mouse controls and overlay.
@@ -29,7 +30,7 @@ The launcher application is its own Android project. Some runtime files are sour
 
 **The Windows game display is still an incomplete compatibility path.** PCGL now has an authenticated X11 software-window path and starts it as part of the game launch flow, but the server is only a subset of X11 core. XRender, MIT-SHM, RandR, XInput2, full multi-client/window-manager behavior, GLX, DRI3/Present, and Vulkan WSI are not implemented. Therefore many Wine applications may fail to open a visible window, and Direct3D games using DXVK are not yet supported by a verified accelerated display path. A successful CI build or process start is not proof that a game is visible or playable. No fixed FPS or game compatibility is promised.
 
-The next required checks are the on-device authenticated X11 TCP diagnostic, a Wine GUI test program, then an accelerated Direct3D test on the target ARM64/Mali device. See [the display integration record](docs/DISPLAY_BACKEND_INTEGRATION.md).
+The display diagnostic screen now has a bundled Win32 GDI smoke-test launcher that initializes a dedicated Wine prefix and starts the test under an authenticated PCGL X11 session. It still requires on-device verification that the window is visible. The next checks are the authenticated X11 TCP diagnostic, the visible Wine GUI test, then an accelerated Direct3D test on the target ARM64/Mali device. See [the display integration record](docs/DISPLAY_BACKEND_INTEGRATION.md).
 
 ## Architecture direction
 

@@ -57,6 +57,18 @@ The normal launcher flow now hands a prepared game to the display Activity. Afte
 
 This wiring makes the transport reachable in principle, but it has not yet proven that the packaged Bionic Wine client completes the X11 handshake or that a Wine window is accepted by this partial server. A successful CI build does not prove that the X11 window appears on the phone.
 
+## Stage 4.5 — bundled Win32 GUI smoke-test launcher
+
+The APK build creates and packages `pcgl-display-test.exe`, a small x86_64 Win32 GDI window program. The native display diagnostic Activity exposes a dedicated action to:
+
+1. Locate the installed PCGL Wine runtime and create a dedicated diagnostic game workspace.
+2. Initialize its Wine prefix before starting the GUI display.
+3. Copy the bundled PE32+ x86_64 test executable into that prefix and verify its architecture.
+4. Start the authenticated PCGL X11 display session and launch the test through the APK-bundled Box64 engine and Wine.
+5. Display the process log and monitor process exit.
+
+This gives the physical-device test a reproducible executable and a single app-side launch path. It does **not** itself prove the window appears: the acceptance test still requires seeing the GDI test window on the Android Surface and checking that its content can update and close cleanly.
+
 ## Graphics and input limits
 
 The current core X11 software path is not an accelerated Windows game renderer. In particular:
