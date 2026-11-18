@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Looper
 import android.view.Gravity
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -13,6 +14,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.suksesjt12.pcgamelauncher.x11.PcglX11ProtocolSelfTest
+import com.suksesjt12.pcgamelauncher.x11.PcglX11DisplaySession
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -25,7 +27,9 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var frameView: TextView
     private lateinit var x11TestButton: Button
     private lateinit var tcpX11TestButton: Button
-    private lateinit var uploadTestButton
+    private lateinit var startX11SessionButton: Button
+    private lateinit var stopX11SessionButton: Button
+    private lateinit var uploadTestButton: Button
     private lateinit var clearFrameButton: Button
     private val displayBackend: PcglDisplayBackend = PcglEglSurfaceBackend()
 
@@ -35,10 +39,22 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
     @Volatile private var x11TestRunning = false
     @Volatile private var frameTestRunning = false
     private var frameIndex = 0L
+    @Volatile private var surfaceWidth = 1280
+    @Volatile private var surfaceHeight = 720
+    @Volatile private var pendingGameLaunchStarted = false
+    private val pendingX11Frame = java.util.concurrent.atomic.AtomicReference<PcglWindowFrame?>(null)
+    private val uiHandler = Handler(Looper.getMainLooper())
 
     private val frameTask = object : Runnable {
         override fun run() {
             if (!displayReady || isFinishing || isDestroyed) return
+            pendingX11Frame.getAndSet(null)?.let { frame ->
+                if (!displayBackend.submitWindowFrame(frame)) {
+                    runOnUiThread {
+                        if (!isDestroyed) statusView.text = "X11 FRAME UPLOAD FAILED\\n" + displayBackend.details()
+                    }
+                }
+            }
             val ok = try { displayBackend.renderFrame(frameIndex) } catch (_: Throwable) { false }
             if (!ok) {
                 displayReady = false
@@ -106,6 +122,18 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
             setOnClickListener { runX11TcpProtocolSelfTest() }
         }
         footer.addView(tcpX11TestButton)
+
+        startX11SessionButton = Button(this).apply {
+            text = "START X11 DISPLAY FOR WINE"
+            setOnClickListener { startDiagnosticX11Session() }
+        }
+        footer.addView(startX11SessionButton)
+
+        stopX11SessionButton = Button(this).apply {
+            text = "STOP X11 DISPLAY SESSION"
+            setOnClickListener { stopX11Session() }
+        }
+        footer.addView(stopX11SessionButton)
 
         uploadTestButton = Button(this).apply {
             text = "TEST RGBA WINDOW FRAME UPLOAD"
