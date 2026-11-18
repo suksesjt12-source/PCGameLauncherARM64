@@ -26,6 +26,8 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var frameView: TextView
 
     @Volatile private var displayReady = false
+    @Volatile private var activityResumed = false
+    @Volatile private var surfaceAvailable = false
     private var frameIndex = 0L
 
     private val frameTask = object : Runnable {
@@ -95,6 +97,7 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
+        surfaceAvailable = true
         val surface = holder.surface
         val width = holder.surfaceFrame.width().coerceAtLeast(1)
         val height = holder.surfaceFrame.height().coerceAtLeast(1)
@@ -118,7 +121,7 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
             if (displayReady) {
                 frameIndex = 0L
                 renderHandler.removeCallbacks(frameTask)
-                renderHandler.post(frameTask)
+                startRenderingIfPossible()
             }
         }
     }
@@ -136,6 +139,7 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
+        surfaceAvailable = false
         displayReady = false
         renderHandler.removeCallbacks(frameTask)
         val latch = CountDownLatch(1)
@@ -147,9 +151,22 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        activityResumed = true
+        startRenderingIfPossible()
+    }
+
     override fun onPause() {
+        activityResumed = false
         renderHandler.removeCallbacks(frameTask)
         super.onPause()
+    }
+
+    private fun startRenderingIfPossible() {
+        if (!activityResumed || !surfaceAvailable || !displayReady) return
+        renderHandler.removeCallbacks(frameTask)
+        renderHandler.post(frameTask)
     }
 
     override fun onDestroy() {
