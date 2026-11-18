@@ -29,8 +29,10 @@ internal class PcglX11Framebuffer(
         var pixels: ByteArray
     )
 
+    private data class GraphicsContext(var foreground: Int = 0, var background: Int = 0x00ffffff)
+
     private val drawables = LinkedHashMap<Int, Drawable>()
-    private val graphicsContexts = HashSet<Int>()
+    private val graphicsContexts = HashMap<Int, GraphicsContext>()
 
     init {
         require(screenWidth in 1..4096 && screenHeight in 1..4096)
@@ -98,11 +100,26 @@ internal class PcglX11Framebuffer(
     }
 
     @Synchronized
-    fun createGraphicsContext(id: Int): Boolean =
-        id != 0 && graphicsContexts.add(id)
+    fun createGraphicsContext(
+        id: Int,
+        foreground: Int = 0,
+        background: Int = 0x00ffffff
+    ): Boolean {
+        if (id == 0 || graphicsContexts.containsKey(id)) return false
+        graphicsContexts[id] = GraphicsContext(foreground and 0x00ffffff, background and 0x00ffffff)
+        return true
+    }
 
     @Synchronized
-    fun freeGraphicsContext(id: Int): Boolean = graphicsContexts.remove(id)
+    fun configureGraphicsContext(id: Int, foreground: Int?, background: Int?): Boolean {
+        val gc = graphicsContexts[id] ?: return false
+        foreground?.let { gc.foreground = it and 0x00ffffff }
+        background?.let { gc.background = it and 0x00ffffff }
+        return true
+    }
+
+    @Synchronized
+    fun freeGraphicsContext(id: Int): Boolean = graphicsContexts.remove(id) != null
 
     @Synchronized
     fun freePixmap(id: Int): Boolean {
@@ -192,7 +209,7 @@ internal class PcglX11Framebuffer(
         byteOrder: ByteOrder
     ): Boolean {
         val drawable = drawables[drawableId] ?: return false
-        if (!graphicsContexts.contains(gcId) || format != Z_PIXMAP || depth != 24) return false
+        if (gcId !in graphicsContexts || format != Z_PIXMAP || depth != 24) return false
         if (width !in 1..4096 || height !in 1..4096) return false
         val stride = align4(width * 4)
         val required = stride.toLong() * height
@@ -236,7 +253,7 @@ internal class PcglX11Framebuffer(
     ): Boolean {
         val source = drawables[sourceId] ?: return false
         val destination = drawables[destinationId] ?: return false
-        if (!graphicsContexts.contains(gcId) || width !in 1..4096 || height !in 1..4096) return false
+        if (gcId !in graphicsContexts || width !in 1..4096 || height !in 1..4096) return false
         val snapshot = source.pixels.copyOf()
         for (row in 0 until height) {
             val sy = sourceY + row
@@ -252,6 +269,43 @@ internal class PcglX11Framebuffer(
             }
         }
         if (destination.isWindow) publishFrame()
+        return true
+    }
+
+    @Synchronized
+    fun fillRectangles(
+        drawableId: Int,
+        gcId: Int,
+        rectangles: List<IntArray>
+    ): Boolean {
+        val drawable = drawables[drawableId] ?: return false
+        val gc = graphicsContexts[gcId] ?: return false
+        if (rectangles.size > MAX_RECTANGLES) return false
+        val red = ((gc.foreground ushr 16) and 0xff).toByte()
+        val green = ((gc.foreground ushr 8) and 0xff).toByte()
+        val blue = (gc.foreground and 0xff).toByte()
+
+        for (rectangle in rectangles) {
+            if (rectangle.size != 4) return false
+            val x0 = rectangle[0].coerceAtLeast(0)
+            val y0 = rectangle[1].coerceAtLeast(0)
+            val x1 = (rectangle[0].toLong() + rectangle[2].coerceAtLeast(0))
+                .coerceAtMost(drawable.width.toLong()).toInt()
+            val y1 = (rectangle[1].toLong() + rectangle[3].coerceAtLeast(0))
+                .coerceAtMost(drawable.height.toLong()).toInt()
+            if (x1 <= x0 || y1 <= y0) continue
+            for (row in y0 until y1) {
+                var offset = (row * drawable.width + x0) * 4
+                for (column in x0 until x1) {
+                    drawable.pixels[offset] = red
+                    drawable.pixels[offset + 1] = green
+                    drawable.pixels[offset + 2] = blue
+                    drawable.pixels[offset + 3] = 0xff.toByte()
+                    offset += 4
+                }
+            }
+        }
+        if (drawable.isWindow) publishFrame()
         return true
     }
 
@@ -310,5 +364,6 @@ internal class PcglX11Framebuffer(
         const val Z_PIXMAP = 2
         const val MAX_FRAME_BYTES = 64L * 1024L * 1024L
         const val MAX_TOTAL_DRAWABLE_BYTES = 128L * 1024L * 1024L
+        const val MAX_RECTANGLES = 4096
     }
 }
