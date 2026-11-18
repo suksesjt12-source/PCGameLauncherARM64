@@ -1,15 +1,41 @@
-# Runtime package format (schema version 2)
+# Runtime package and automatic bootstrap
 
-The Android APK contains the native ARM64 Box64 host engine at
-`lib/arm64-v8a/libbox64.so`. The Android package installer extracts this native library
-to the application's native library directory. The application launches Box64 only from
-that APK-managed directory.
+## Recommended setup: automatic in-app installation
 
-A user-supplied runtime ZIP contains the x86_64 Wine userspace and x64 Windows DLLs. It
-must contain `runtime.json` at its root. The importer rejects path traversal, duplicate
-archive entries, invalid hashes, incorrect ELF machine types, and incorrect PE machine
-types. The extracted guest executables are loaded by Box64; Android does not directly
-execute them from the writable app data directory.
+The normal setup no longer requires the user to import a Wine ZIP. The app downloads
+and installs two pinned Winlator Mali Bionic release assets into its private
+`filesDir/imagefs` directory:
+
+| Component | Release asset | Size | SHA-256 |
+|---|---|---:|---|
+| Base filesystem | `imagefs.tzst` | 199,788,880 bytes | `0c8c6c1c7653766323378f3294be6618392075bd354d50b2416a534a6e231620` |
+| Wine runtime | `proton-9.0-x86_64.tzst` | 52,247,947 bytes | `9c60d605b68865a6c9861bdda54c2e4d845183b0b4ee3e04a8677eb1a74207a6` |
+
+Source: the published `Sd` release at
+[Winlator-Extras](https://github.com/GunaCharanTeja/Winlator-Extras/releases/tag/Sd).
+The installer checks HTTPS source host, exact archive size, and the pinned SHA-256
+before extracting. Extraction rejects absolute/traversal paths, checks canonical
+parents against the install root, caps archive entries and expanded data, and
+does not create device nodes, sockets, or FIFOs. Failed installations are removed
+from the staging directory; an existing non-PCGL `imagefs` directory is never
+overwritten.
+
+Box64 is built for Android ARM64 and bundled in the APK at
+`lib/arm64-v8a/libbox64.so`. Proton is installed under
+`imagefs/opt/proton-9.0-x86_64`. The app validates Wine/wineserver ELF x86_64
+binaries and `wineboot.exe` PE32+ x86_64 before marking the runtime installed.
+This bootstrap declares x86-only support as disabled; it does not claim that
+32-bit Windows programs will run.
+
+DXVK remains an optional in-app component download. Vulkan device detection is
+not a rendering compatibility test, and a graphics wrapper must be compatible
+with the device's GPU driver.
+
+## Legacy schema-v2 ZIP format
+
+The schema-v2 ZIP importer remains in the source for backward compatibility.
+It is no longer required for the normal first-run setup. Its expected structure
+is documented below.
 
 ## Required archive layout
 
@@ -128,13 +154,13 @@ physical hardware is still required.
 - Runtime import checks structure, hashes, file formats, and architecture, not runtime compatibility.
 - Box64 ARM64 is built and bundled inside the APK; it does not need a separate user download.
 - The in-app DXVK downloader requires an official GitHub release asset SHA-256 digest. Older official releases without that published digest are deliberately rejected by automatic installation.
-- The Wine runtime itself is not downloaded automatically because a generic desktop Wine build is not a compatible Android/Box64 runtime package. Users still need one compatible schema v2 Wine package.
+- The bootstrap downloads Winlator Mali's Bionic filesystem and its Proton 9.0 x86_64 package using pinned SHA-256 values. This is a known source package, not a general Wine-package discovery engine.
 - Wine execution depends on the contents and build configuration of the supplied runtime ZIP.
 - Wine prefix initialization invokes `wineboot.exe` through Box64.
 - Game launch reports that the process started; it does not prove the game reached its main menu.
 - DXVK x64 DLL installation into Wine system32 and per-process native overrides are implemented. Actual DXVK/Vulkan rendering compatibility still requires device testing.
 - Vulkan device enumeration is not a DXVK rendering test or compatibility guarantee.
-- Audio and gamepad support remain separate work.
+- The Android-side XServer/SDL display lifecycle and complete PulseAudio service startup are not yet integrated. Runtime installation and a Wine process start do not prove visible game rendering or gameplay.
 - SHA-256 detects changes relative to the manifest; it does not authenticate the publisher.
 - This project is not an EXE-to-APK converter.
 
