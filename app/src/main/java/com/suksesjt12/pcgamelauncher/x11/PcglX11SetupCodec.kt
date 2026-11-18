@@ -2,6 +2,7 @@ package com.suksesjt12.pcgamelauncher.x11
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.security.MessageDigest
 
 /** Wire-format helpers for the initial X11 connection setup exchange. */
 internal object PcglX11SetupCodec {
@@ -18,7 +19,7 @@ internal object PcglX11SetupCodec {
         data class Rejected(val byteOrder: ByteOrder, val reason: String, val consumedBytes: Int) : ParseResult()
     }
 
-    fun parseRequest(bytes: ByteArray): ParseResult {
+    fun parseRequest(bytes: ByteArray, expectedAuthCookie: ByteArray? = null): ParseResult {
         if (bytes.isEmpty()) return ParseResult.NeedMore
         val byteOrder = when (bytes[0].toInt() and 0xff) {
             0x6c -> ByteOrder.LITTLE_ENDIAN
@@ -38,8 +39,21 @@ internal object PcglX11SetupCodec {
         if (major != PROTOCOL_MAJOR || minor > PROTOCOL_MINOR) {
             return ParseResult.Rejected(byteOrder, "Unsupported X11 protocol version " + major + "." + minor + ".", totalLength)
         }
-        if (authNameLength != 0 || authDataLength != 0) {
-            return ParseResult.Rejected(byteOrder, "This PCGL development server does not accept X11 authorization records yet.", totalLength)
+        val authNameOffset = 12
+        val authDataOffset = authNameOffset + align4(authNameLength)
+        if (expectedAuthCookie == null) {
+            if (authNameLength != 0 || authDataLength != 0) {
+                return ParseResult.Rejected(byteOrder, "This X11 endpoint accepts unauthenticated local socket clients only.", totalLength)
+            }
+        } else {
+            val authName = String(bytes, authNameOffset, authNameLength, Charsets.ISO_8859_1)
+            val authData = bytes.copyOfRange(authDataOffset, authDataOffset + authDataLength)
+            val cookieMatches = authName == MIT_MAGIC_COOKIE_NAME &&
+                authData.size == expectedAuthCookie.size &&
+                MessageDigest.isEqual(authData, expectedAuthCookie)
+            if (!cookieMatches) {
+                return ParseResult.Rejected(byteOrder, "X11 MIT-MAGIC-COOKIE-1 authentication failed.", totalLength)
+            }
         }
         return ParseResult.Accepted(byteOrder, totalLength)
     }
@@ -140,4 +154,6 @@ internal object PcglX11SetupCodec {
     }
 
     fun align4(value: Int): Int = (value + 3) and -4
+
+    const val MIT_MAGIC_COOKIE_NAME = "MIT-MAGIC-COOKIE-1"
 }
