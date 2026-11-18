@@ -47,7 +47,8 @@ object WineRuntimeEnvironment {
         prefix: File,
         environment: MutableMap<String, String>,
         audioMode: String = "default",
-        pulseLatencyMs: Int = 60
+        pulseLatencyMs: Int = 60,
+        displayEndpoint: String? = null
     ) {
         val validation = validate(context, runtime)
         if (!validation.isReady) {
@@ -104,12 +105,22 @@ object WineRuntimeEnvironment {
         environment["SSL_CERT_FILE"] = File(usr, "etc/tls/cert.pem").absolutePath
         environment["SSL_CERT_DIR"] = File(usr, "etc/tls/certs").absolutePath
 
-        // The Winlator Mali display server uses X display :0. This variable alone
-        // does not create a server; game launch still needs the XServer subsystem.
-        environment["DISPLAY"] = environment["DISPLAY"] ?: ":0"
+        // Never advertise a dummy X display. The caller may set DISPLAY only
+        // after a real PCGL-owned X11 server has completed its startup handshake.
+        val validatedDisplay = displayEndpoint?.trim()?.takeIf {
+            it.matches(Regex("^(?::[0-9]+|localhost:[0-9]+|127\\.0\\.0\\.1:[0-9]+)(\\.[0-9]+)?$"))
+        }
+        if (validatedDisplay != null) {
+            environment["DISPLAY"] = validatedDisplay
+            environment["WINE_X11FORCEGLX"] = "1"
+            environment["BOX64_X11GLX"] = "1"
+        } else {
+            environment.remove("DISPLAY")
+            environment.remove("WINE_X11FORCEGLX")
+            environment.remove("BOX64_X11GLX")
+        }
         environment["WINE_NO_DUPLICATE_EXPLORER"] = "1"
         environment["WINE_DISABLE_FULLSCREEN_HACK"] = "1"
-        environment["WINE_X11FORCEGLX"] = "1"
         environment["WINE_GST_NO_GL"] = "1"
         environment["GST_PLUGIN_FEATURE_RANK"] = "ximagesink:3000"
         environment["PROTON_AUDIO_CONVERT"] = "0"
