@@ -9,7 +9,7 @@ Android ARM64 launcher project for organizing and testing legally owned Windows 
 - Keep a local game library.
 - Build the Box64 Android ARM64 host engine from a pinned upstream source revision during GitHub Actions.
 - Package Box64 inside the APK native library directory.
-- Import a compatible x86_64 Wine runtime ZIP using schema version 2; the DXVK DLL pair is optional.
+- Install a pinned Winlator Mali Bionic root filesystem and Proton x86_64 package directly in-app on first setup; both downloads are SHA-256 verified.
 - Validate ZIP paths, extracted size, hashes, ELF architecture, and PE architecture.
 - Create separate per-game workspaces and preserve Wine prefix state.
 - Initialize a Wine prefix through Box64 and Wine's wineboot executable.
@@ -30,12 +30,11 @@ Android ARM64 launcher project for organizing and testing legally owned Windows 
 - Build a small x86_64 Windows helper that connects to an authenticated loopback TCP endpoint and translates virtual-button messages into Win32 SendInput keyboard/mouse events inside Wine.
 - Package and verify both the ARM64 Box64 host engine and x86_64 Wine input helper in the debug APK through GitHub Actions.
 
-## Runtime package
+## Automatic runtime setup
 
-See [docs/runtime-package-format.md](docs/runtime-package-format.md) for the required ZIP layout and schema.
+Box64 is built for Android ARM64 and bundled in the APK. On first setup, the app can download and install the Winlator Mali Bionic base filesystem plus the Proton 9.0 x86_64 Wine package directly into private app storage. The two release assets are pinned by exact byte size and SHA-256; damaged, truncated, or changed downloads are rejected. No user-supplied Wine ZIP is required. DXVK remains an optional in-app download and should only be enabled when the device graphics path is compatible.
 
-The APK workflow builds Box64 for Android ARM64 and embeds it as `libbox64.so`, so Box64 does not need a separate download. The user runtime ZIP contains x86_64 Wine, wineserver, and wineboot.exe. DXVK is downloaded separately from official GitHub releases; the runtime ZIP may also bundle both DXVK DLLs. Set
-`supportsX86` to true only for a Wine build tested with 32-bit Windows support.
+The older schema-v2 ZIP importer remains in the source for backward compatibility, but it is no longer the normal setup path. Details and checksums are documented in [docs/runtime-package-format.md](docs/runtime-package-format.md).
 
 ## Current limitations
 
