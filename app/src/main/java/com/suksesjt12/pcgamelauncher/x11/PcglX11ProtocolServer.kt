@@ -29,20 +29,18 @@ class PcglX11ProtocolServer(
         val authCookie: ByteArray? = null
     )
 
-    private data class XProperty(val type: Int, val format: Int, val value: ByteArray)
-
     private data class ClientState(
         var byteOrder: ByteOrder = ByteOrder.LITTLE_ENDIAN,
         var setupComplete: Boolean = false,
         var sequence: Int = 0,
         var pending: ByteArray = ByteArray(0),
         val eventMasks: MutableMap<Int, Int> = HashMap(),
-        val properties: MutableMap<Int, MutableMap<Int, XProperty>> = HashMap(),
         var focusedWindow: Int = PcglX11SetupCodec.ROOT_WINDOW_ID,
         var revertTo: Int = 1
     )
 
     private val framebuffer = PcglX11Framebuffer(screenWidthPx, screenHeightPx, frameSink)
+    private val propertyStore = PcglX11PropertyStore()
     private val atomRegistry = PcglX11AtomRegistry()
     private val authCookie: ByteArray? = if (tcpPort != null) {
         ByteArray(16).also { SecureRandom().nextBytes(it) }
@@ -166,9 +164,9 @@ class PcglX11ProtocolServer(
             15 -> queryTree(state, request)
             16 -> internAtom(state, request)
             17 -> getAtomName(state, request)
-            18 -> changeProperty(state, request)
-            19 -> deleteProperty(state, request)
-            20 -> getProperty(state, request)
+            18 -> changeProperty(client, state, request)
+            19 -> deleteProperty(client, state, request)
+            20 -> getProperty(client, state, request)
             21 -> listProperties(state, request)
             42 -> setInputFocus(state, request)
             43 -> getInputFocus(state, request)
@@ -233,8 +231,14 @@ class PcglX11ProtocolServer(
         notifySelected(client, state, window, STRUCTURE_NOTIFY, event(state, 17).apply {
             putInt(4, window); putInt(8, window)
         })
+        removeWindowPropertiesRecursively(window)
         if (!framebuffer.destroyWindow(window)) return buildError(state, BAD_WINDOW, window, 4)
         return null
+    }
+
+    private fun removeWindowPropertiesRecursively(window: Int) {
+        framebuffer.children(window).forEach(::removeWindowPropertiesRecursively)
+        propertyStore.removeWindow(window)
     }
 
     private fun mapWindow(client: Client, state: ClientState, request: ByteArray): ByteArray? {
@@ -510,7 +514,7 @@ class PcglX11ProtocolServer(
         return output.array()
     }
 
-    private fun changeProperty(state: ClientState, request: ByteArray): ByteArray? {
+    private fun changeProperty(client: Client, state: ClientState, request: ByteArray): ByteArray? {
         if (request.size < 24) return buildError(state, BAD_LENGTH, 0, 18)
         val mode = request[1].toInt() and 0xff
         val window = readU32(request, 4, state.byteOrder)
@@ -519,43 +523,46 @@ class PcglX11ProtocolServer(
         val format = request[16].toInt() and 0xff
         val itemCount = readU32(request, 20, state.byteOrder)
         if (!framebuffer.hasWindow(window)) return buildError(state, BAD_WINDOW, window, 18)
-        if (propertyAtom == 0 || typeAtom == 0) return buildError(state, BAD_ATOM, if (propertyAtom == 0) propertyAtom else typeAtom, 18)
+        if (propertyAtom == 0 || typeAtom == 0) {
+            return buildError(state, BAD_ATOM, if (propertyAtom == 0) propertyAtom else typeAtom, 18)
+        }
         if (mode !in 0..2 || format !in setOf(8, 16, 32) || itemCount < 0) {
             return buildError(state, BAD_VALUE, itemCount, 18)
         }
         val bytesPerItem = format / 8
         val dataLength = itemCount.toLong() * bytesPerItem
-        if (dataLength > MAX_PROPERTY_BYTES || 24L + PcglX11SetupCodec.align4(dataLength.toInt()) != request.size.toLong()) {
+        if (dataLength > MAX_PROPERTY_BYTES ||
+            24L + PcglX11SetupCodec.align4(dataLength.toInt()) != request.size.toLong()
+        ) {
             return buildError(state, BAD_LENGTH, 0, 18)
         }
         val newValue = request.copyOfRange(24, 24 + dataLength.toInt())
-        val windowProperties = state.properties.getOrPut(window) { HashMap() }
-        val previous = windowProperties[propertyAtom]
-        if (previous != null && previous.format != format) {
-            return buildError(state, BAD_MATCH, propertyAtom, 18)
+        when (propertyStore.change(window, propertyAtom, typeAtom, format, mode, newValue, MAX_PROPERTY_BYTES)) {
+            PcglX11PropertyStore.ChangeResult.SUCCESS -> {
+                notifyPropertyChange(client, state, window, propertyAtom, PROPERTY_NEW_VALUE)
+                return null
+            }
+            PcglX11PropertyStore.ChangeResult.TYPE_MISMATCH,
+            PcglX11PropertyStore.ChangeResult.FORMAT_MISMATCH ->
+                return buildError(state, BAD_MATCH, propertyAtom, 18)
+            PcglX11PropertyStore.ChangeResult.TOO_LARGE ->
+                return buildError(state, BAD_ALLOC, propertyAtom, 18)
         }
-        val combined = when (mode) {
-            0 -> newValue
-            1 -> (newValue + (previous?.value ?: ByteArray(0)))
-            2 -> ((previous?.value ?: ByteArray(0)) + newValue)
-            else -> newValue
-        }
-        if (combined.size > MAX_PROPERTY_BYTES) return buildError(state, BAD_ALLOC, propertyAtom, 18)
-        windowProperties[propertyAtom] = XProperty(typeAtom, format, combined)
-        return null
     }
 
-    private fun deleteProperty(state: ClientState, request: ByteArray): ByteArray? {
+    private fun deleteProperty(client: Client, state: ClientState, request: ByteArray): ByteArray? {
         if (request.size != 12) return buildError(state, BAD_LENGTH, 0, 19)
         val window = readU32(request, 4, state.byteOrder)
         val propertyAtom = readU32(request, 8, state.byteOrder)
         if (!framebuffer.hasWindow(window)) return buildError(state, BAD_WINDOW, window, 19)
         if (propertyAtom == 0) return buildError(state, BAD_ATOM, propertyAtom, 19)
-        state.properties[window]?.remove(propertyAtom)
+        if (propertyStore.remove(window, propertyAtom)) {
+            notifyPropertyChange(client, state, window, propertyAtom, PROPERTY_DELETE)
+        }
         return null
     }
 
-    private fun getProperty(state: ClientState, request: ByteArray): ByteArray? {
+    private fun getProperty(client: Client, state: ClientState, request: ByteArray): ByteArray? {
         if (request.size != 24) return buildError(state, BAD_LENGTH, 0, 20)
         val delete = request[1].toInt() != 0
         val window = readU32(request, 4, state.byteOrder)
@@ -567,7 +574,7 @@ class PcglX11ProtocolServer(
         if (propertyAtom == 0) return buildError(state, BAD_ATOM, propertyAtom, 20)
         if (longOffset < 0 || longLength < 0) return buildError(state, BAD_VALUE, longOffset, 20)
 
-        val property = state.properties[window]?.get(propertyAtom)
+        val property = propertyStore.get(window, propertyAtom)
         if (property == null || (requestedType != 0 && requestedType != property.type)) {
             val output = replyBuffer(state.byteOrder, 32, 1, 0, state.sequence, 0)
             output.putInt(0)
@@ -591,7 +598,9 @@ class PcglX11ProtocolServer(
         repeat(12) { output.put(0) }
         output.put(value)
         repeat(paddedLength - value.size) { output.put(0) }
-        if (delete && bytesAfter == 0) state.properties[window]?.remove(propertyAtom)
+        if (delete && bytesAfter == 0 && propertyStore.remove(window, propertyAtom)) {
+            notifyPropertyChange(client, state, window, propertyAtom, PROPERTY_DELETE)
+        }
         return output.array()
     }
 
@@ -599,12 +608,28 @@ class PcglX11ProtocolServer(
         if (request.size != 8) return buildError(state, BAD_LENGTH, 0, 21)
         val window = readU32(request, 4, state.byteOrder)
         if (!framebuffer.hasWindow(window)) return buildError(state, BAD_WINDOW, window, 21)
-        val atoms = state.properties[window]?.keys?.toList().orEmpty()
+        val atoms = propertyStore.atomIds(window)
         val output = replyBuffer(state.byteOrder, 32 + atoms.size * 4, 1, 0, state.sequence, atoms.size)
         output.putShort(atoms.size.toShort())
         repeat(22) { output.put(0) }
         atoms.forEach { output.putInt(it) }
         return output.array()
+    }
+
+    private fun notifyPropertyChange(
+        client: Client,
+        state: ClientState,
+        window: Int,
+        atom: Int,
+        propertyState: Int
+    ) {
+        if (((state.eventMasks[window] ?: 0) and PROPERTY_CHANGE) == 0) return
+        val notification = event(state, 28)
+        notification.putInt(4, window)
+        notification.putInt(8, atom)
+        notification.putInt(12, 0) // CurrentTime
+        notification.put(16, propertyState.toByte())
+        writeResponse(client, notification.array())
     }
 
     private fun setInputFocus(state: ClientState, request: ByteArray): ByteArray? {
@@ -826,5 +851,8 @@ class PcglX11ProtocolServer(
         const val STRUCTURE_NOTIFY = 1 shl 17
         const val SUBSTRUCTURE_NOTIFY = 1 shl 19
         const val EXPOSURE = 1 shl 15
+        const val PROPERTY_CHANGE = 1 shl 22
+        const val PROPERTY_NEW_VALUE = 0
+        const val PROPERTY_DELETE = 1
     }
 }

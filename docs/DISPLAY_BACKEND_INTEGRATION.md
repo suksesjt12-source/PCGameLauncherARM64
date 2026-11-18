@@ -20,6 +20,10 @@ The connector is adapted from the MIT-licensed XConnector implementation in [Gun
 
 TCP mode is restricted to loopback and requires a 16-byte MIT-MAGIC-COOKIE-1 value. PcglXAuthority writes an owner-only Xauthority record into the selected per-game workspace. The server rejects empty, incorrect, or unexpected authorization records. The session manager returns the DISPLAY endpoint and Xauthority path only after the listener is active.
 
+## Stage 4.2b — shared X11 window properties
+
+Window properties are stored in one server-owned property table instead of per-client state. XGetProperty and ListProperties therefore read values written by another client on the same server. Replace, Append and Prepend follow the core X11 type/format rules, mutations are memory-bounded, property data is returned through defensive copies, and deleting a window clears its property records. PropertyNotify is delivered to the requesting client when that client selected PropertyChangeMask; cross-client event broadcast and selection ownership remain incomplete.
+
 ## Stage 4.2a — shared X11 atom registry
 
 The protocol server now uses one server-wide atom registry for every connected client. The 68 X11 core predefined atoms are exposed with their fixed protocol IDs (1–68); dynamically interned atoms start at 69. InternAtom and GetAtomName use the same bidirectional registry, so a client can resolve an atom created by another client. This improves core protocol compatibility but does not imply complete multi-client window/resource ownership.
