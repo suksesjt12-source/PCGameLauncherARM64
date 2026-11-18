@@ -48,3 +48,34 @@ Apache Commons Compress: https://commons.apache.org/proper/commons-compress/
 
 DXVK and other optional graphics components retain their respective upstream
 licenses. Their license texts must accompany any redistributed component package.
+
+
+## X11 transport (adapted from WinlatorMali)
+
+Source: https://github.com/GunaCharanTeja/WinlatorMali/tree/bionic-mali-1.2  
+Upstream license: MIT  
+Copyright (c) 2023 BrunoSX
+
+PCGL includes an adapted copy of the upstream XConnector AF_UNIX/epoll transport and stream classes. PCGL-specific modifications include a separate Java package, separate JNI symbol names, loading through `launcher_native`, runtime-root socket-path validation, and AF_UNIX path-length validation. The upstream XServer protocol core and Winlator Android application UI are not included in this transport port.
+
+MIT License
+
+Copyright (c) 2023 BrunoSX
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
