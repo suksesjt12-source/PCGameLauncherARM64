@@ -5,7 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.nio.ByteOrder
 
 class PcglX11FramebufferTest {
     @Test
@@ -15,19 +14,16 @@ class PcglX11FramebufferTest {
         val window = 0x00200010
         val gc = 0x00200011
 
-        assertTrue(framebuffer.createWindow(
-            window, PcglX11SetupCodec.ROOT_WINDOW_ID, 2, 1, 2, 2, 24
-        ))
+        assertTrue(framebuffer.createWindow(window, PcglX11SetupCodec.ROOT_WINDOW_ID, 2, 1, 2, 2, 24))
         assertTrue(framebuffer.createGraphicsContext(gc))
         assertTrue(framebuffer.mapWindow(window))
 
-        // Two rows of 32-bpp little-endian X11 TrueColor pixels (B, G, R, unused).
         val bgrx = byteArrayOf(
             0, 0, 0xff.toByte(), 0, 0, 0xff.toByte(), 0, 0,
             0xff.toByte(), 0, 0, 0, 0, 0, 0, 0
         )
         assertTrue(framebuffer.putImage(
-            window, gc, 2, 2, 2, 0, 0, 24, bgrx, ByteOrder.LITTLE_ENDIAN
+            window, gc, 2, 2, 2, 0, 0, 24, bgrx, java.nio.ByteOrder.LITTLE_ENDIAN
         ))
 
         val frame = rendered
@@ -49,16 +45,35 @@ class PcglX11FramebufferTest {
     fun invalidDepthAndUnknownGraphicsContextAreRejected() {
         val framebuffer = PcglX11Framebuffer(8, 8) {}
         val window = 0x00200010
-        assertTrue(framebuffer.createWindow(
-            window, PcglX11SetupCodec.ROOT_WINDOW_ID, 0, 0, 2, 2, 24
-        ))
+        assertTrue(framebuffer.createWindow(window, PcglX11SetupCodec.ROOT_WINDOW_ID, 0, 0, 2, 2, 24))
         val pixels = ByteArray(16)
         assertTrue(!framebuffer.putImage(
-            window, 0x00200012, 2, 2, 2, 0, 0, 24, pixels, ByteOrder.LITTLE_ENDIAN
+            window, 0x00200012, 2, 2, 2, 0, 0, 24, pixels, java.nio.ByteOrder.LITTLE_ENDIAN
         ))
         assertTrue(framebuffer.createGraphicsContext(0x00200011))
         assertTrue(!framebuffer.putImage(
-            window, 0x00200011, 2, 2, 2, 0, 0, 16, pixels, ByteOrder.LITTLE_ENDIAN
+            window, 0x00200011, 2, 2, 2, 0, 0, 16, pixels, java.nio.ByteOrder.LITTLE_ENDIAN
         ))
+    }
+
+    @Test
+    fun fillRectangleUsesGraphicsContextForegroundColor() {
+        var rendered: PcglWindowFrame? = null
+        val framebuffer = PcglX11Framebuffer(8, 6) { rendered = it }
+        val window = 0x00200020
+        val gc = 0x00200021
+
+        assertTrue(framebuffer.createWindow(window, PcglX11SetupCodec.ROOT_WINDOW_ID, 1, 1, 4, 3, 24))
+        assertTrue(framebuffer.createGraphicsContext(gc, foreground = 0x0033aa55))
+        assertTrue(framebuffer.mapWindow(window))
+        assertTrue(framebuffer.fillRectangles(window, gc, listOf(intArrayOf(1, 1, 2, 1))))
+
+        val pixels = rendered!!.rgbaPixels
+        val filled = (2 * 8 + 2) * 4
+        val outside = (1 * 8 + 1) * 4
+        assertEquals(0x33, pixels[filled].toInt() and 0xff)
+        assertEquals(0xaa, pixels[filled + 1].toInt() and 0xff)
+        assertEquals(0x55, pixels[filled + 2].toInt() and 0xff)
+        assertEquals(0, pixels[outside].toInt() and 0xff)
     }
 }
