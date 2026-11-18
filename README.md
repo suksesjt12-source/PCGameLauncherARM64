@@ -15,7 +15,10 @@ This is not a renamed Winlator APK. The project uses interoperable runtime compo
 - Optional official DXVK download, checksum validation, installation, and per-game configuration.
 - Vulkan device and queue capability probe.
 - PCGL-owned Android Surface/EGL session and GLES diagnostic renderer.
-- PCGL-namespaced AF_UNIX/epoll X11 transport module with JNI client I/O and a protocol-dispatch lifecycle contract (transport only; X11 protocol server is still in progress).
+- PCGL-namespaced X11 AF_UNIX and loopback TCP transports; TCP mode binds to 127.0.0.1 and requires MIT-MAGIC-COOKIE-1 authentication.
+- X11 11.0 setup, Xauthority generation, and an initial software window/drawable implementation (CreateWindow/MapWindow, GC, ZPixmap PutImage/GetImage, CopyArea, PolyFillRectangle, geometry/tree queries, and selected core events).
+- RGBA8888 software framebuffer composition routed to the Android EGL texture renderer.
+- Launcher-to-display Activity handoff; the game launch path starts an authenticated X11 display session before passing DISPLAY/XAUTHORITY to Wine.
 - Device temperature, memory, and process-memory monitor.
 - Per-game virtual keyboard/mouse controls and overlay.
 - Per-game graphics, audio, and controller preferences.
@@ -24,7 +27,9 @@ This is not a renamed Winlator APK. The project uses interoperable runtime compo
 
 The launcher application is its own Android project. Some runtime files are sourced from third-party projects and retain their original licenses. In particular, the current Bionic Wine root filesystem package is based on the Winlator Mali runtime distribution. This is a runtime dependency, not a copy of the Winlator Mali Android application.
 
-**The game display backend is not complete yet. See [the X11 display integration plan](docs/DISPLAY_BACKEND_INTEGRATION.md).** The current launcher can prepare a Wine prefix and start Box64/Wine processes, but it does not yet own a complete XServer/SDL/EGL window lifecycle. A successful process start or EGL diagnostic test is not proof that a game is visible or playable. No fixed FPS or game compatibility is promised.
+**The Windows game display is still an incomplete compatibility path.** PCGL now has an authenticated X11 software-window path and starts it as part of the game launch flow, but the server is only a subset of X11 core. XRender, MIT-SHM, RandR, XInput2, full multi-client/window-manager behavior, GLX, DRI3/Present, and Vulkan WSI are not implemented. Therefore many Wine applications may fail to open a visible window, and Direct3D games using DXVK are not yet supported by a verified accelerated display path. A successful CI build or process start is not proof that a game is visible or playable. No fixed FPS or game compatibility is promised.
+
+The next required checks are the on-device authenticated X11 TCP diagnostic, a Wine GUI test program, then an accelerated Direct3D test on the target ARM64/Mali device. See [the display integration record](docs/DISPLAY_BACKEND_INTEGRATION.md).
 
 ## Architecture direction
 
@@ -35,9 +40,9 @@ See [docs/ENGINE_ARCHITECTURE.md](docs/ENGINE_ARCHITECTURE.md) for the independe
 1. Open the repository's **Actions** tab.
 2. Select **Android APK**.
 3. Run the workflow or push a change to the tracked source paths.
-4. Download the `PCGameLauncher-debug-apk` artifact from a successful run.
+4. Download the PCGameLauncher-debug-apk artifact from a successful run.
 
-APK output: `app/build/outputs/apk/debug/app-debug.apk`.
+APK output: app/build/outputs/apk/debug/app-debug.apk.
 
 ## Intended device
 
