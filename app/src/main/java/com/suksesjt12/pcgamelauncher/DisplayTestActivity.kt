@@ -95,7 +95,7 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
         }
         footer.addView(frameView)
         x11TestButton = Button(this).apply {
-            text = "RUN X11 PROTOCOL SELF-TEST"
+            text = "TEST X11 WINDOW + GAME FRAME PIPELINE"
             setOnClickListener { runX11ProtocolSelfTest() }
         }
         footer.addView(x11TestButton)
@@ -141,7 +141,19 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
         x11TestButton.isEnabled = false
         statusView.text = "PCGL X11 PROTOCOL\nStarting local AF_UNIX setup test..."
         Thread {
-            val result = PcglX11ProtocolSelfTest.run(File(filesDir, "pcgl/x11-protocol-test"))
+            val result = PcglX11ProtocolSelfTest.run(File(filesDir, "pcgl/x11-protocol-test")) { frame ->
+                // EGL context ownership stays on the renderer thread; X11 callbacks only enqueue frames.
+                renderHandler.post {
+                    if (displayReady && !isDestroyed) {
+                        val uploaded = displayBackend.submitWindowFrame(frame)
+                        if (!uploaded) {
+                            runOnUiThread {
+                                if (!isDestroyed) statusView.text = "X11 FRAME UPLOAD FAILED\\n" + displayBackend.details()
+                            }
+                        }
+                    }
+                }
+            }
             runOnUiThread {
                 x11TestRunning = false
                 if (!isDestroyed) {
@@ -211,7 +223,7 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
                 if (!isDestroyed) {
                     statusView.text = "PCGL NATIVE DISPLAY\n" + result
                     frameView.text = if (displayReady) {
-                        "EGL context active. Rendering PCGL diagnostic frames at approximately 30 FPS. This is not a Windows game image."
+                        "EGL context active. X11 core framebuffer test is available; this screen is still a protocol/renderer test, not proof of a Windows game."
                     } else {
                         "Initialization failed. Review the status above."
                     }
