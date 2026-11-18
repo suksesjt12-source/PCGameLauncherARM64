@@ -305,14 +305,18 @@ class PcglX11ProtocolServer(
         val notify = event(state, 22)
         notify.putInt(4, window)
         notify.putInt(8, window)
-        notify.putShort(12, geometry.x.toShort())
-        notify.putShort(14, geometry.y.toShort())
-        notify.putShort(16, geometry.width.toShort())
-        notify.putShort(18, geometry.height.toShort())
-        notify.putShort(20, 0)
-        notify.putInt(22, 0)
-        notify.put(26, 0)
+        notify.putInt(12, 0) // above-sibling: None
+        notify.putShort(16, geometry.x.toShort())
+        notify.putShort(18, geometry.y.toShort())
+        notify.putShort(20, geometry.width.toShort())
+        notify.putShort(22, geometry.height.toShort())
+        notify.putShort(24, 0) // border width
+        notify.put(26, 0) // override-redirect
         notify.put(27, 0)
+        notify.put(28, 0)
+        notify.put(29, 0)
+        notify.put(30, 0)
+        notify.put(31, 0)
         notifySelected(client, state, window, STRUCTURE_NOTIFY, notify)
         return null
     }
@@ -515,7 +519,7 @@ class PcglX11ProtocolServer(
         if (!framebuffer.hasWindow(window)) return buildError(state, BAD_WINDOW, window, 15)
         val children = framebuffer.children(window)
         val parent = if (window == PcglX11SetupCodec.ROOT_WINDOW_ID) {
-            PcglX11SetupCodec.ROOT_WINDOW_ID
+            0
         } else {
             framebuffer.parentOf(window) ?: PcglX11SetupCodec.ROOT_WINDOW_ID
         }
