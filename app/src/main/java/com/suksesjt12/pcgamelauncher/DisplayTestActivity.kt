@@ -314,6 +314,10 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
 
     private fun runX11TcpProtocolSelfTest() {
         if (x11TestRunning) return
+        if (PcglX11DisplaySession.isRunning()) {
+            statusView.text = "PCGL X11 TCP\\nStop the active display session before running the temporary server test."
+            return
+        }
         x11TestRunning = true
         tcpX11TestButton.isEnabled = false
         statusView.text = "PCGL X11 TCP\\nStarting authenticated loopback display test..."
@@ -392,6 +396,8 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
         val surface = holder.surface
         val width = holder.surfaceFrame.width().coerceAtLeast(1)
         val height = holder.surfaceFrame.height().coerceAtLeast(1)
+        surfaceWidth = width
+        surfaceHeight = height
         renderHandler.post {
             val result = try {
                 displayBackend.attach(surface, width, height).details
@@ -413,12 +419,15 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
                 frameIndex = 0L
                 renderHandler.removeCallbacks(frameTask)
                 startRenderingIfPossible()
+                runOnUiThread { startPendingGameIfRequested() }
             }
         }
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
         if (width < 1 || height < 1) return
+        surfaceWidth = width
+        surfaceHeight = height
         renderHandler.post {
             if (displayReady && !displayBackend.resize(width, height)) {
                 val details = NativeBridge.displayInfo()
@@ -465,6 +474,25 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
     override fun onDestroy() {
         displayReady = false
         renderHandler.removeCallbacks(frameTask)
+        uiHandler.removeCallbacks(gameStatusPoll)
+        PcglPendingGameLaunch.clear()
+        if (RuntimeExecutionManager.isGameRunning()) {
+            val runtime = RuntimeBootstrapManager.findInstalled(filesDir)
+                ?: RuntimePackageManager.findInstalled(filesDir)
+            if (runtime != null) {
+                Thread {
+                    runCatching {
+                        RuntimeExecutionManager.stopWindowsGame(applicationContext, runtime)
+                    }
+                }.apply {
+                    name = "PCGL-Display-Activity-Cleanup"
+                    isDaemon = true
+                    start()
+                }
+            }
+        }
+        PcglX11DisplaySession.stop()
+        ControllerOverlayManager.hide()
         renderHandler.post { NativeBridge.destroyDisplaySurface() }
         renderThread.quitSafely()
         super.onDestroy()
