@@ -2,60 +2,77 @@
 
 ## Current implementation
 
-PCGL owns a native Android Surface + EGL/OpenGL ES backend. It creates an EGL context and supports a diagnostic renderer plus a CPU RGBA8888 frame upload path. The texture path accepts tightly packed top-left-origin RGBA frames up to 4096x4096 and 64 MiB, copies them into a GLES texture, and displays the texture on the Android Surface.
+PCGL owns a native Android Surface + EGL/OpenGL ES backend. It creates an EGL context and supports a diagnostic renderer plus a CPU RGBA8888 frame upload path. The texture path accepts tightly packed top-left-origin RGBA frames up to 4096x4096 and 64 MiB, copies them into a GLES texture, and displays them on the Android Surface.
 
-The Kotlin boundary is PcglDisplayBackend. PcglWindowFrame validates frame dimensions, memory size and byte count before a frame is submitted. EGL calls must remain serialized on the renderer thread because an EGL context cannot be current on multiple threads at once.
+The Kotlin boundary is PcglDisplayBackend. PcglWindowFrame validates frame dimensions, memory size and byte count before a frame is submitted. EGL calls must remain serialized on the renderer thread because an EGL context cannot be current on multiple threads at once. X11 socket callbacks only enqueue the latest complete frame; they do not use EGL directly.
 
-## Stage 4.1 — X11 transport layer
+## Stage 4.1 — X11 transports
 
-The repository contains a separately namespaced PCGL X11 transport module:
+The repository contains a separately namespaced PCGL transport layer:
 
 - AF_UNIX stream socket creation with a runtime-root constrained path.
-- epoll-based client connection monitoring.
-- direct-buffer client I/O and ancillary file-descriptor transfer.
-- a Kotlin lifecycle adapter and disconnect path.
+- A loopback TCP listener bound to 127.0.0.1 on port 6000 (X11 display :0).
+- epoll-based client connection monitoring, direct-buffer I/O and ancillary file-descriptor transport for the AF_UNIX path.
+- A Kotlin lifecycle adapter and disconnect path.
 - JNI symbols and native-library loading namespaced to PCGL.
 
-The transport is adapted from the MIT-licensed XConnector implementation in [GunaCharanTeja/WinlatorMali](https://github.com/GunaCharanTeja/WinlatorMali/tree/bionic-mali-1.2). Its original attribution and license are retained in THIRD_PARTY_NOTICES.md. This is a reusable connector component, not the Winlator Android application or its display Activity.
+The connector is adapted from the MIT-licensed XConnector implementation in [GunaCharanTeja/WinlatorMali](https://github.com/GunaCharanTeja/WinlatorMali/tree/bionic-mali-1.2). Its original attribution and license are retained in THIRD_PARTY_NOTICES.md. This is a reusable connector component, not the Winlator Android application or its display Activity.
+
+TCP mode is restricted to loopback and requires a 16-byte MIT-MAGIC-COOKIE-1 value. PcglXAuthority writes an owner-only Xauthority record into the selected per-game workspace. The server rejects empty, incorrect, or unexpected authorization records. The session manager returns the DISPLAY endpoint and Xauthority path only after the listener is active.
 
 ## Stage 4.2 — X11 protocol bootstrap
 
-PCGL parses X11 byte order and the X11 11.0 setup exchange, returns a 24-bit TrueColor root screen, rejects unimplemented authorization records, and bounds input/request memory. A limited core-query set is implemented: GetInputFocus, QueryExtension, ListExtensions, GetGeometry, QueryTree, GetWindowAttributes, InternAtom and GetAtomName.
+PCGL parses X11 byte order and the X11 11.0 setup exchange, returns a 24-bit TrueColor root screen, and bounds input/request memory. TCP mode verifies MIT-MAGIC-COOKIE-1 using a constant-time byte comparison; AF_UNIX test mode accepts only empty authorization records.
+
+The initial read/query set includes GetInputFocus, QueryExtension, ListExtensions, GetGeometry, QueryTree, GetWindowAttributes, InternAtom, GetAtomName and GetImage (ZPixmap). Unknown requests return protocol errors or a null extension result; this is not a complete implementation of the X11 protocol or its extensions.
 
 ## Stage 4.3 — software window/drawable path
 
-The PCGL core server now has a bounded software drawable store and handles a first subset of X11 core requests:
+The PCGL core server has a bounded software drawable store and handles a first subset of X11 core requests:
 
 - CreateWindow, ChangeWindowAttributes (event-mask selection), DestroyWindow, MapWindow, UnmapWindow and ConfigureWindow;
-- CreatePixmap / FreePixmap and CreateGC / FreeGC;
-- ZPixmap PutImage for depth-24 TrueColor using 32 bits per pixel;
-- CopyArea and ClearArea;
+- CreatePixmap / FreePixmap and CreateGC / ChangeGC / FreeGC, with foreground/background state;
+- ZPixmap PutImage and GetImage for depth-24 TrueColor using 32 bits per pixel;
+- CopyArea, ClearArea and PolyFillRectangle;
 - GetGeometry, QueryTree and GetWindowAttributes for registered windows/drawables;
 - basic MapNotify, UnmapNotify, DestroyNotify, ConfigureNotify and Expose delivery to the requesting client's selected event masks.
 
-Mapped child windows are composed into a screen-sized RGBA8888 frame, with bounds on drawable dimensions and total allocation. A local on-device protocol test sends a real X11 setup packet, creates/maps a small window, creates a GC, submits a ZPixmap image and checks that the expected pixel reached the frame sink. The EGL display test queues those frames onto the renderer thread rather than making the EGL context current from the socket thread.
+Mapped child windows are composed into a screen-sized RGBA8888 frame, with bounds on drawable dimensions and total allocation. Frames can be uploaded to the Android EGL texture renderer. Local JVM tests cover pixel conversion, drawing, and readback; the on-device protocol tests send actual X11 setup/request packets through AF_UNIX and authenticated TCP.
 
-This provides a working core software-image path for compatible X11 clients. It is not a complete X server: full event routing across clients, visual/depth variants, GC raster functions, XRender, MIT-SHM, RandR, XInput2, GLX, DRI3 and Vulkan WSI are not implemented.
+This provides a software core-image path for compatible X11 clients. It is not a complete X server: full event routing across clients, resource ID ownership, visuals/depth variants, most GC raster operations, background handling, XRender, MIT-SHM, RandR, XInput2, GLX, DRI3/Present and Vulkan WSI are not implemented.
 
-## Stage 4.4 — EGL frame presentation
+## Stage 4.4 — EGL frame presentation and game launch wiring
 
-PcglDisplayBackend.submitWindowFrame uploads software RGBA8888 frames into an OpenGL ES texture and presents them on the Android Surface. The display diagnostic screen now links the X11 window/image protocol self-test to this bridge. This verifies the X11-to-CPU-frame-to-EGL code path when the diagnostic is run on a device; CI unit tests only verify the framebuffer conversion and APK compilation.
+PcglDisplayBackend.submitWindowFrame uploads software RGBA8888 frames into an OpenGL ES texture and presents them on the Android Surface. The display Activity keeps EGL operations on its renderer thread and consumes the newest queued X11 frame.
 
-## Wine display endpoint safety
+The normal launcher flow now hands a prepared game to the display Activity. After the Android Surface is ready, that Activity starts PcglX11DisplaySession, creates an Xauthority file in the game's container, and only then launches Box64/Wine with the authenticated DISPLAY/XAUTHORITY environment. When the process exits or the display Activity is closed, the session is stopped and its authority file is removed.
 
-Wine must not receive a fabricated DISPLAY=:0. WineRuntimeEnvironment.apply only publishes DISPLAY when its caller supplies a syntactically valid endpoint after a real server has completed its startup handshake. The current AF_UNIX endpoint has not yet been proven reachable from the packaged Bionic Wine process on Android, and the X11 core subset is not sufficient for most accelerated game renderers. The launcher must therefore keep DISPLAY unset until the client transport and Wine graphics path pass an end-to-end test.
+This wiring makes the transport reachable in principle, but it has not yet proven that the packaged Bionic Wine client completes the X11 handshake or that a Wine window is accepted by this partial server. A successful CI build does not prove that the X11 window appears on the phone.
+
+## Graphics and input limits
+
+The current core X11 software path is not an accelerated Windows game renderer. In particular:
+
+- GLX, DRI3/Present and Vulkan WSI are not implemented.
+- DXVK therefore has no verified X11/Vulkan surface path here.
+- XRender, MIT-SHM and RandR are not implemented.
+- Full keyboard/pointer event routing into X11 is not implemented.
+- The current overlay/helper sends keyboard and mouse events to the Windows guest; it does not expose a tested SDL/XInput virtual gamepad.
+
+WineRuntimeEnvironment deliberately does not force GLX variables for the current software-only server. DISPLAY is set only while an authenticated PCGL display session is active.
 
 ## Remaining integration sequence
 
-1. Extend the X11 core implementation for the request/event patterns used by Wine's X11 driver and the target GUI toolkit.
-2. Prove the app-private AF_UNIX socket path is reachable from the Bionic Wine process, or implement a loopback TCP transport with authenticated setup.
-3. Implement a window manager policy, focus, pointer/keyboard event delivery, and robust multi-client resource ownership.
-4. Add XRender/SHM acceleration for software windows and GLX/DRI3 or a separately supported Wine/Vulkan WSI path for accelerated games.
-5. Connect Android touch, keyboard and gamepad input to X11 and/or SDL/XInput with tested axis/button semantics.
-6. Verify a Windows GUI test program, then a Direct3D game, on a physical ARM64 Android device.
+1. Run the authenticated TCP test on a physical Android device and verify the Xauthority file and loopback connection.
+2. Launch a minimal Wine GUI program (for example, a basic text editor) and verify CreateWindow/MapWindow/draw/update/close on the Android Surface.
+3. Expand core X11 request/event coverage and add focus, pointer, keyboard, selection, property and multi-client resource ownership.
+4. Add XRender/MIT-SHM or an equivalent efficient software path for GUI applications.
+5. Implement and validate an accelerated graphics route (GLX, or the DRI3/Present/Vulkan WSI stack needed by the chosen Wine/DXVK route).
+6. Route Android touch, keyboard and gamepad axes/buttons into the focused window and verify actual game controls.
+7. Run a Direct3D game on a physical ARM64 Mali-G57 device, then profile performance, memory and thermals.
 
 ## Acceptance tests
 
-The current core-framebuffer milestone is complete at code level only when X11 framebuffer unit tests and APK compilation pass. The on-device diagnostic must then be run to verify AF_UNIX request handling and EGL presentation.
+Code-level X11 milestones require JVM unit tests and a successful Android APK build. The on-device diagnostic must verify the AF_UNIX and authenticated loopback TCP paths, including the Xauthority handshake and EGL presentation.
 
-The game-display milestone is separate and is complete only when a Windows GUI test program connects to PCGL's server, creates a visible window, updates frames, receives pointer and keyboard input, and exits cleanly. The accelerated-game milestone additionally requires a tested graphics API path. CI compilation and frame-upload tests alone do not satisfy either acceptance test.
+The visible Windows GUI milestone is complete only when a Wine GUI executable connects to PCGL, creates a visible window, updates its content, receives input, and exits cleanly on a physical Android device. The playable Direct3D milestone additionally requires a tested GLX or Vulkan WSI route and a Direct3D game test. CI compilation, protocol unit tests and diagnostic rendering alone do not satisfy either acceptance criterion.
