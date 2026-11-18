@@ -148,9 +148,11 @@ class PcglX11ProtocolServer(
             53 -> createPixmap(state, request)
             54 -> freePixmap(state, request)
             55 -> createGraphicsContext(state, request)
+            56 -> changeGraphicsContext(state, request)
             60 -> freeGraphicsContext(state, request)
             61 -> clearArea(state, request)
             62 -> copyArea(state, request)
+            70 -> polyFillRectangle(state, request)
             72 -> putImage(state, request)
             98 -> queryExtension(state, request)
             99 -> listExtensions(state, request)
@@ -323,7 +325,70 @@ class PcglX11ProtocolServer(
         val mask = readU32(request, 12, state.byteOrder)
         if (request.size != 16 + Integer.bitCount(mask) * 4) return buildError(state, BAD_LENGTH, 0, 55)
         if (!framebuffer.hasDrawable(drawable)) return buildError(state, BAD_DRAWABLE, drawable, 55)
-        if (!framebuffer.createGraphicsContext(id)) return buildError(state, BAD_ID_CHOICE, id, 55)
+        var foreground = 0
+        var background = 0x00ffffff
+        var offset = 16
+        for (bit in 0 until 23) {
+            if ((mask and (1 shl bit)) == 0) continue
+            val value = readU32(request, offset, state.byteOrder)
+            when (bit) {
+                2 -> foreground = value
+                3 -> background = value
+            }
+            offset += 4
+        }
+        if (!framebuffer.createGraphicsContext(id, foreground, background)) {
+            return buildError(state, BAD_ID_CHOICE, id, 55)
+        }
+        return null
+    }
+
+    private fun changeGraphicsContext(state: ClientState, request: ByteArray): ByteArray? {
+        if (request.size < 12) return buildError(state, BAD_LENGTH, 0, 56)
+        val id = readU32(request, 4, state.byteOrder)
+        val mask = readU32(request, 8, state.byteOrder)
+        if (request.size != 12 + Integer.bitCount(mask) * 4) return buildError(state, BAD_LENGTH, 0, 56)
+        var foreground: Int? = null
+        var background: Int? = null
+        var offset = 12
+        for (bit in 0 until 23) {
+            if ((mask and (1 shl bit)) == 0) continue
+            val value = readU32(request, offset, state.byteOrder)
+            when (bit) {
+                2 -> foreground = value
+                3 -> background = value
+            }
+            offset += 4
+        }
+        if (!framebuffer.configureGraphicsContext(id, foreground, background)) {
+            return buildError(state, BAD_GC, id, 56)
+        }
+        return null
+    }
+
+    private fun polyFillRectangle(state: ClientState, request: ByteArray): ByteArray? {
+        if (request.size < 12 || (request.size - 12) % 8 != 0) {
+            return buildError(state, BAD_LENGTH, 0, 70)
+        }
+        val drawable = readU32(request, 4, state.byteOrder)
+        val gc = readU32(request, 8, state.byteOrder)
+        if (!framebuffer.hasDrawable(drawable)) return buildError(state, BAD_DRAWABLE, drawable, 70)
+        val rectangles = ArrayList<IntArray>((request.size - 12) / 8)
+        var offset = 12
+        while (offset < request.size) {
+            rectangles.add(
+                intArrayOf(
+                    readI16(request, offset, state.byteOrder),
+                    readI16(request, offset + 2, state.byteOrder),
+                    readU16(request, offset + 4, state.byteOrder),
+                    readU16(request, offset + 6, state.byteOrder)
+                )
+            )
+            offset += 8
+        }
+        if (!framebuffer.fillRectangles(drawable, gc, rectangles)) {
+            return buildError(state, BAD_GC, gc, 70)
+        }
         return null
     }
 
