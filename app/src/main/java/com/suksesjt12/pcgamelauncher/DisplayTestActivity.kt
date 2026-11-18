@@ -24,12 +24,15 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var statusView: TextView
     private lateinit var frameView: TextView
     private lateinit var x11TestButton: Button
+    private lateinit var uploadTestButton: Button
+    private lateinit var clearFrameButton: Button
     private val displayBackend: PcglDisplayBackend = PcglEglSurfaceBackend()
 
     @Volatile private var displayReady = false
     @Volatile private var activityResumed = false
     @Volatile private var surfaceAvailable = false
     @Volatile private var x11TestRunning = false
+    @Volatile private var frameTestRunning = false
     private var frameIndex = 0L
 
     private val frameTask = object : Runnable {
@@ -96,6 +99,32 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
             setOnClickListener { runX11ProtocolSelfTest() }
         }
         footer.addView(x11TestButton)
+
+        uploadTestButton = Button(this).apply {
+            text = "TEST RGBA WINDOW FRAME UPLOAD"
+            setOnClickListener { runWindowFrameUploadTest() }
+        }
+        footer.addView(uploadTestButton)
+
+        clearFrameButton = Button(this).apply {
+            text = "CLEAR FRAME / SHOW DIAGNOSTIC"
+            setOnClickListener {
+                renderHandler.post {
+                    val cleared = displayBackend.clearWindowFrame()
+                    runOnUiThread {
+                        if (!isDestroyed) {
+                            statusView.text = if (cleared) {
+                                "PCGL FRAME BRIDGE\\nFrame texture cleared."
+                            } else {
+                                "PCGL FRAME BRIDGE\\nUnable to clear frame texture."
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        footer.addView(clearFrameButton)
+
         footer.addView(Button(this).apply {
             text = "CLOSE DISPLAY TEST"
             setOnClickListener { finish() }
@@ -124,6 +153,45 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
             name = "PCGL-X11-SelfTest"
             isDaemon = true
             start()
+        }
+    }
+
+    private fun runWindowFrameUploadTest() {
+        if (!displayReady || frameTestRunning) return
+        frameTestRunning = true
+        uploadTestButton.isEnabled = false
+        renderHandler.post {
+            val width = 320
+            val height = 180
+            val pixels = ByteArray(width * height * 4)
+            for (y in 0 until height) {
+                for (x in 0 until width) {
+                    val index = (y * width + x) * 4
+                    val bar = (x / 40) % 8
+                    pixels[index] = when (bar) {
+                        0, 1 -> 255.toByte()
+                        2, 3 -> 32
+                        4, 5 -> 32
+                        else -> 220.toByte()
+                    }
+                    pixels[index + 1] = ((y * 255) / (height - 1)).toByte()
+                    pixels[index + 2] = ((x * 255) / (width - 1)).toByte()
+                    pixels[index + 3] = 255.toByte()
+                }
+            }
+            val frame = runCatching { PcglWindowFrame(width, height, pixels) }.getOrNull()
+            val accepted = frame != null && displayBackend.submitWindowFrame(frame)
+            runOnUiThread {
+                frameTestRunning = false
+                if (!isDestroyed) {
+                    uploadTestButton.isEnabled = true
+                    statusView.text = if (accepted) {
+                        "PCGL FRAME BRIDGE\\nPASS: 320x180 RGBA frame uploaded to the EGL texture."
+                    } else {
+                        "PCGL FRAME BRIDGE\\nFAIL: EGL texture rejected the RGBA frame."
+                    }
+                }
+            }
         }
     }
 

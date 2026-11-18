@@ -14,6 +14,8 @@ object NativeBridge {
     external fun deviceInfo(): String
     external fun createDisplaySurface(surface: Surface, width: Int, height: Int): String
     external fun resizeDisplaySurface(width: Int, height: Int): Boolean
+    external fun submitWindowFrame(rgbaPixels: ByteArray, width: Int, height: Int): Boolean
+    external fun clearWindowFrame(): Boolean
     external fun renderDisplayFrame(frameIndex: Long): Boolean
     external fun destroyDisplaySurface()
     external fun displayInfo(): String

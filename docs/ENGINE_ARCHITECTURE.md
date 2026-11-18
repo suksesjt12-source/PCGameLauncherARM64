@@ -14,8 +14,8 @@ PCGL is not a rebranded Winlator application. It may consume compatible open-sou
 - Per-game Wine prefixes and EXE staging: implemented.
 - DXVK component manager: implemented.
 - Device diagnostics and keyboard/mouse overlay: implemented with limitations documented in source.
-- Native Android Surface/EGL lifecycle and OpenGL ES diagnostic rendering: implemented as a proof of concept behind the `PcglDisplayBackend` interface.
-- PCGL-namespaced X11 AF_UNIX/epoll transport and dispatcher interface: added; protocol core and game-window bridge remain unimplemented.
+- Native Android Surface/EGL lifecycle, OpenGL ES diagnostic rendering, and RGBA8888 texture-upload bridge: implemented behind the `PcglDisplayBackend` interface.
+- PCGL-namespaced X11 AF_UNIX/epoll transport and a minimal X11 11.0 setup/core-query bootstrap: added; window-resource integration and game-window rendering remain unimplemented.
 - SDL input/gamepad bridge: not yet implemented; current overlay maps to keyboard/mouse.
 - End-to-end visible game rendering: not yet verified.
 
@@ -33,8 +33,9 @@ PCGL is not a rebranded Winlator application. It may consume compatible open-sou
 
 - **Milestone A — independent application boundary:** remove the companion Winlator APK handoff and its branding workflow; keep all user-facing launcher operations in PCGL.
 - **Milestone B — runtime contract:** define stable interfaces for runtime packages, game profiles, process sessions, display sessions, and input providers.
-- **Milestone C1 — Android EGL proof of concept:** create/destroy a native Android Surface/EGL session and submit OpenGL ES diagnostic frames.
-- **Milestone C2 — Wine display bridge:** integrate a compatible, licensed display server/window path and verify a Windows test app is visibly rendered.
+- **Milestone C1 — Android EGL proof of concept:** create/destroy a native Android Surface/EGL session, submit diagnostic frames, and upload RGBA8888 frame textures.
+- **Milestone C2 — X11 window integration:** connect X11 window resources and drawable damage/resize events to the PCGL RGBA texture bridge.
+- **Milestone C3 — Wine display bridge:** connect Wine/GLX/DRI3 or another supported rendering path and verify a Windows test app is visibly rendered.
 - **Milestone D — input proof of concept:** route touch events to the active window, then add a tested virtual gamepad backend.
 - **Milestone E — Mali device profiles:** benchmark a small set of workloads on real Mali-G57 devices before shipping automatic defaults.
 - **Milestone F — AI diagnostics:** summarize logs and explain settings; all changes remain reviewable and reversible.

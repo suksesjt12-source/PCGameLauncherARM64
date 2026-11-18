@@ -9,6 +9,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <cstdint>
 
 extern "C"
 JNIEXPORT jstring JNICALL
@@ -111,6 +112,14 @@ struct PcglEglSession {
     GLuint program = 0;
     GLint positionAttribute = -1;
     GLint colorAttribute = -1;
+    GLuint textureProgram = 0;
+    GLint texturePositionAttribute = -1;
+    GLint textureCoordinateAttribute = -1;
+    GLint textureSamplerUniform = -1;
+    GLuint frameTexture = 0;
+    jint frameWidth = 0;
+    jint frameHeight = 0;
+    bool hasFrameTexture = false;
     bool ready = false;
     std::string info = "PCGL EGL session idle.";
 };
@@ -194,6 +203,91 @@ bool pcglCreateDiagnosticProgram(std::string& error) {
     return true;
 }
 
+
+bool pcglCreateWindowTextureProgram(std::string& error) {
+    static const char* vertexSource =
+        "attribute vec2 aPosition;\n"
+        "attribute vec2 aTexCoord;\n"
+        "varying vec2 vTexCoord;\n"
+        "void main(){ gl_Position=vec4(aPosition,0.0,1.0); vTexCoord=aTexCoord; }\n";
+    static const char* fragmentSource =
+        "precision mediump float;\n"
+        "uniform sampler2D uFrame;\n"
+        "varying vec2 vTexCoord;\n"
+        "void main(){ gl_FragColor=texture2D(uFrame,vTexCoord); }\n";
+
+    const GLuint vertex = pcglCompileShader(GL_VERTEX_SHADER, vertexSource, error);
+    if (vertex == 0) return false;
+    const GLuint fragment = pcglCompileShader(GL_FRAGMENT_SHADER, fragmentSource, error);
+    if (fragment == 0) {
+        glDeleteShader(vertex);
+        return false;
+    }
+
+    const GLuint program = glCreateProgram();
+    if (program == 0) {
+        error = "glCreateProgram for frame texture failed.";
+        glDeleteShader(vertex);
+        glDeleteShader(fragment);
+        return false;
+    }
+    glAttachShader(program, vertex);
+    glAttachShader(program, fragment);
+    glLinkProgram(program);
+    glDeleteShader(vertex);
+    glDeleteShader(fragment);
+
+    GLint linked = GL_FALSE;
+    glGetProgramiv(program, GL_LINK_STATUS, &linked);
+    if (linked != GL_TRUE) {
+        GLint length = 0;
+        glGetProgramiv(program, GL_INFO_LOG_LENGTH, &length);
+        std::string info(static_cast<size_t>(length > 1 ? length : 1), '\0');
+        glGetProgramInfoLog(program, length, nullptr, info.data());
+        error = "Frame texture shader link failed: " + info;
+        glDeleteProgram(program);
+        return false;
+    }
+
+    g_pcglEgl.texturePositionAttribute = glGetAttribLocation(program, "aPosition");
+    g_pcglEgl.textureCoordinateAttribute = glGetAttribLocation(program, "aTexCoord");
+    g_pcglEgl.textureSamplerUniform = glGetUniformLocation(program, "uFrame");
+    if (g_pcglEgl.texturePositionAttribute < 0 ||
+        g_pcglEgl.textureCoordinateAttribute < 0 ||
+        g_pcglEgl.textureSamplerUniform < 0) {
+        error = "Frame texture shader bindings are unavailable.";
+        glDeleteProgram(program);
+        return false;
+    }
+    g_pcglEgl.textureProgram = program;
+    return true;
+}
+
+void pcglDrawFrameTextureLocked() {
+    // Source rows are top-to-bottom RGBA; texture coordinates flip Y for Android's screen origin.
+    static const GLfloat vertices[] = {
+        -1.0f, -1.0f, 0.0f, 1.0f,
+         1.0f, -1.0f, 1.0f, 1.0f,
+        -1.0f,  1.0f, 0.0f, 0.0f,
+         1.0f,  1.0f, 1.0f, 0.0f
+    };
+    glUseProgram(g_pcglEgl.textureProgram);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, g_pcglEgl.frameTexture);
+    glUniform1i(g_pcglEgl.textureSamplerUniform, 0);
+    glEnableVertexAttribArray(static_cast<GLuint>(g_pcglEgl.texturePositionAttribute));
+    glEnableVertexAttribArray(static_cast<GLuint>(g_pcglEgl.textureCoordinateAttribute));
+    glVertexAttribPointer(static_cast<GLuint>(g_pcglEgl.texturePositionAttribute), 2, GL_FLOAT,
+                          GL_FALSE, 4 * sizeof(GLfloat), vertices);
+    glVertexAttribPointer(static_cast<GLuint>(g_pcglEgl.textureCoordinateAttribute), 2, GL_FLOAT,
+                          GL_FALSE, 4 * sizeof(GLfloat), vertices + 2);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glDisableVertexAttribArray(static_cast<GLuint>(g_pcglEgl.texturePositionAttribute));
+    glDisableVertexAttribArray(static_cast<GLuint>(g_pcglEgl.textureCoordinateAttribute));
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glUseProgram(0);
+}
+
 std::string pcglEglError(const char* operation) {
     std::ostringstream out;
     out << operation << " failed (EGL error 0x" << std::hex << eglGetError() << ").";
@@ -204,6 +298,8 @@ void pcglDestroyEglLocked() {
         if (g_pcglEgl.context != EGL_NO_CONTEXT && g_pcglEgl.surface != EGL_NO_SURFACE) {
             eglMakeCurrent(g_pcglEgl.display, g_pcglEgl.surface, g_pcglEgl.surface, g_pcglEgl.context);
             if (g_pcglEgl.program != 0) glDeleteProgram(g_pcglEgl.program);
+            if (g_pcglEgl.textureProgram != 0) glDeleteProgram(g_pcglEgl.textureProgram);
+            if (g_pcglEgl.frameTexture != 0) glDeleteTextures(1, &g_pcglEgl.frameTexture);
         }
         eglMakeCurrent(g_pcglEgl.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         if (g_pcglEgl.surface != EGL_NO_SURFACE) eglDestroySurface(g_pcglEgl.display, g_pcglEgl.surface);
@@ -278,7 +374,8 @@ Java_com_suksesjt12_pcgamelauncher_NativeBridge_createDisplaySurface(
         return pcglNewString(env, g_pcglEgl.info);
     }
     std::string shaderError;
-    if (!pcglCreateDiagnosticProgram(shaderError)) {
+    if (!pcglCreateDiagnosticProgram(shaderError) ||
+        !pcglCreateWindowTextureProgram(shaderError)) {
         pcglDestroyEglLocked();
         g_pcglEgl.info = "ERROR: " + shaderError;
         return pcglNewString(env, g_pcglEgl.info);
@@ -296,6 +393,95 @@ Java_com_suksesjt12_pcgamelauncher_NativeBridge_createDisplaySurface(
          << g_pcglEgl.width << "x" << g_pcglEgl.height;
     g_pcglEgl.info = info.str(); g_pcglEgl.ready = true;
     return pcglNewString(env, g_pcglEgl.info);
+}
+
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_suksesjt12_pcgamelauncher_NativeBridge_submitWindowFrame(
+    JNIEnv* env, jobject, jbyteArray rgbaPixels, jint width, jint height) {
+    if (rgbaPixels == nullptr || width < 1 || height < 1 || width > 4096 || height > 4096) {
+        return JNI_FALSE;
+    }
+    const uint64_t expectedBytes =
+        static_cast<uint64_t>(width) * static_cast<uint64_t>(height) * 4ULL;
+    if (expectedBytes > 64ULL * 1024ULL * 1024ULL ||
+        env->GetArrayLength(rgbaPixels) != static_cast<jsize>(expectedBytes)) {
+        return JNI_FALSE;
+    }
+
+    std::vector<jbyte> pixels;
+    try {
+        pixels.resize(static_cast<size_t>(expectedBytes));
+    } catch (const std::bad_alloc&) {
+        return JNI_FALSE;
+    }
+    env->GetByteArrayRegion(
+        rgbaPixels, 0, static_cast<jsize>(expectedBytes), pixels.data());
+    if (env->ExceptionCheck()) return JNI_FALSE;
+
+    std::lock_guard<std::mutex> guard(g_pcglEglMutex);
+    if (!g_pcglEgl.ready || g_pcglEgl.textureProgram == 0) return JNI_FALSE;
+    if (eglMakeCurrent(g_pcglEgl.display, g_pcglEgl.surface,
+                       g_pcglEgl.surface, g_pcglEgl.context) != EGL_TRUE) {
+        g_pcglEgl.info = pcglEglError("eglMakeCurrent during frame upload");
+        return JNI_FALSE;
+    }
+
+    if (g_pcglEgl.frameTexture == 0) glGenTextures(1, &g_pcglEgl.frameTexture);
+    if (g_pcglEgl.frameTexture == 0) {
+        g_pcglEgl.info = "OpenGL ES could not allocate a frame texture.";
+        return JNI_FALSE;
+    }
+
+    glBindTexture(GL_TEXTURE_2D, g_pcglEgl.frameTexture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    if (!g_pcglEgl.hasFrameTexture ||
+        g_pcglEgl.frameWidth != width ||
+        g_pcglEgl.frameHeight != height) {
+        glTexImage2D(
+            GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0,
+            GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    } else {
+        glTexSubImage2D(
+            GL_TEXTURE_2D, 0, 0, 0, width, height,
+            GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    }
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    const GLenum error = glGetError();
+    if (error != GL_NO_ERROR) {
+        std::ostringstream info;
+        info << "OpenGL ES frame upload error 0x" << std::hex << error;
+        g_pcglEgl.info = info.str();
+        return JNI_FALSE;
+    }
+
+    g_pcglEgl.frameWidth = width;
+    g_pcglEgl.frameHeight = height;
+    g_pcglEgl.hasFrameTexture = true;
+    std::ostringstream info;
+    info << "FRAME READY: RGBA " << width << "x" << height
+         << " uploaded to the PCGL EGL texture.";
+    g_pcglEgl.info = info.str();
+    return JNI_TRUE;
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_suksesjt12_pcgamelauncher_NativeBridge_clearWindowFrame(JNIEnv*, jobject) {
+    std::lock_guard<std::mutex> guard(g_pcglEglMutex);
+    if (!g_pcglEgl.ready) return JNI_FALSE;
+    g_pcglEgl.hasFrameTexture = false;
+    g_pcglEgl.frameWidth = 0;
+    g_pcglEgl.frameHeight = 0;
+    g_pcglEgl.info = "PCGL frame texture cleared; diagnostic renderer active.";
+    return JNI_TRUE;
 }
 
 extern "C"
@@ -324,36 +510,41 @@ Java_com_suksesjt12_pcgamelauncher_NativeBridge_renderDisplayFrame(JNIEnv*, jobj
     glClearColor(0.025f + phase * 0.055f, 0.045f, 0.085f + (1.0f - phase) * 0.07f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    const float angle = phase * 6.28318530718f;
-    const float c = std::cos(angle);
-    const float s = std::sin(angle);
-    const float source[] = {
-         0.00f,  0.60f, 0.20f, 0.80f, 1.00f,
-        -0.56f, -0.42f, 1.00f, 0.45f, 0.18f,
-         0.56f, -0.42f, 0.30f, 1.00f, 0.52f
-    };
-    float vertices[15];
-    for (int i = 0; i < 3; ++i) {
-        const float x = source[i * 5];
-        const float y = source[i * 5 + 1];
-        vertices[i * 5] = x * c - y * s;
-        vertices[i * 5 + 1] = x * s + y * c;
-        vertices[i * 5 + 2] = source[i * 5 + 2];
-        vertices[i * 5 + 3] = source[i * 5 + 3];
-        vertices[i * 5 + 4] = source[i * 5 + 4];
+    if (g_pcglEgl.hasFrameTexture && g_pcglEgl.frameTexture != 0) {
+        pcglDrawFrameTextureLocked();
+    } else {
+        const float angle = phase * 6.28318530718f;
+        const float c = std::cos(angle);
+        const float s = std::sin(angle);
+        const float source[] = {
+             0.00f,  0.60f, 0.20f, 0.80f, 1.00f,
+            -0.56f, -0.42f, 1.00f, 0.45f, 0.18f,
+             0.56f, -0.42f, 0.30f, 1.00f, 0.52f
+        };
+        float vertices[15];
+        for (int i = 0; i < 3; ++i) {
+            const float x = source[i * 5];
+            const float y = source[i * 5 + 1];
+            vertices[i * 5] = x * c - y * s;
+            vertices[i * 5 + 1] = x * s + y * c;
+            vertices[i * 5 + 2] = source[i * 5 + 2];
+            vertices[i * 5 + 3] = source[i * 5 + 3];
+            vertices[i * 5 + 4] = source[i * 5 + 4];
+        }
+    
+        glUseProgram(g_pcglEgl.program);
+        glEnableVertexAttribArray(static_cast<GLuint>(g_pcglEgl.positionAttribute));
+        glEnableVertexAttribArray(static_cast<GLuint>(g_pcglEgl.colorAttribute));
+        glVertexAttribPointer(static_cast<GLuint>(g_pcglEgl.positionAttribute), 2, GL_FLOAT,
+                              GL_FALSE, 5 * sizeof(float), vertices);
+        glVertexAttribPointer(static_cast<GLuint>(g_pcglEgl.colorAttribute), 3, GL_FLOAT,
+                              GL_FALSE, 5 * sizeof(float), vertices + 2);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glDisableVertexAttribArray(static_cast<GLuint>(g_pcglEgl.positionAttribute));
+        glDisableVertexAttribArray(static_cast<GLuint>(g_pcglEgl.colorAttribute));
+        glUseProgram(0);
+    
     }
-
-    glUseProgram(g_pcglEgl.program);
-    glEnableVertexAttribArray(static_cast<GLuint>(g_pcglEgl.positionAttribute));
-    glEnableVertexAttribArray(static_cast<GLuint>(g_pcglEgl.colorAttribute));
-    glVertexAttribPointer(static_cast<GLuint>(g_pcglEgl.positionAttribute), 2, GL_FLOAT,
-                          GL_FALSE, 5 * sizeof(float), vertices);
-    glVertexAttribPointer(static_cast<GLuint>(g_pcglEgl.colorAttribute), 3, GL_FLOAT,
-                          GL_FALSE, 5 * sizeof(float), vertices + 2);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
-    glDisableVertexAttribArray(static_cast<GLuint>(g_pcglEgl.positionAttribute));
-    glDisableVertexAttribArray(static_cast<GLuint>(g_pcglEgl.colorAttribute));
-    glUseProgram(0);
 
     const GLenum error = glGetError();
     if (error != GL_NO_ERROR) {
