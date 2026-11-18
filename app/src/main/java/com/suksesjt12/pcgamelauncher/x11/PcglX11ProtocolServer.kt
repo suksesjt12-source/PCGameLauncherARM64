@@ -1,5 +1,6 @@
 package com.suksesjt12.pcgamelauncher.x11
 
+import com.suksesjt12.pcgamelauncher.PcglWindowFrame
 import com.suksesjt12.pcgamelauncher.x11.transport.Client
 import java.io.File
 import java.io.IOException
@@ -7,13 +8,17 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * Minimal PCGL-owned X11 protocol bootstrap. It implements connection setup
- * and a small set of read-only core requests. It is not a complete X server.
+ * PCGL-owned X11 core server.
+ *
+ * Implemented here: setup, resource/drawable basics, map/configure, GC, ZPixmap
+ * PutImage, CopyArea, clear, atoms and selected structure/exposure notifications.
+ * XRender, MIT-SHM, GLX, DRI3, Vulkan WSI and a window manager are not implemented.
  */
 class PcglX11ProtocolServer(
     runtimeRoot: File,
     private val screenWidthPx: Int = 1280,
-    private val screenHeightPx: Int = 720
+    private val screenHeightPx: Int = 720,
+    frameSink: (PcglWindowFrame) -> Unit = {}
 ) : AutoCloseable {
     data class Endpoint(val socketPath: String, val protocolVersion: String = "11.0")
 
@@ -24,9 +29,11 @@ class PcglX11ProtocolServer(
         var pending: ByteArray = ByteArray(0),
         val atomsByName: MutableMap<String, Int> = HashMap(),
         val namesByAtom: MutableMap<Int, String> = HashMap(),
+        val eventMasks: MutableMap<Int, Int> = HashMap(),
         var nextAtom: Int = 1
     )
 
+    private val framebuffer = PcglX11Framebuffer(screenWidthPx, screenHeightPx, frameSink)
     private lateinit var transport: PcglX11Transport
 
     private val dispatcher = object : PcglX11Transport.ProtocolDispatcher {
@@ -110,31 +117,274 @@ class PcglX11ProtocolServer(
             val request = state.pending.copyOfRange(0, requestLengthBytes)
             consumePending(state, requestLengthBytes)
             state.sequence = (state.sequence + 1) and 0xffff
-            val response = dispatchRequest(state, request)
-            if (response != null) writeResponse(client, response)
+            try {
+                val response = dispatchRequest(client, state, request)
+                if (response != null) writeResponse(client, response)
+            } catch (_: Throwable) {
+                writeResponse(client, buildError(state, BAD_IMPLEMENTATION, 0, request[0].toInt() and 0xff))
+                transport.disconnect(client)
+                return false
+            }
             progressed = true
         }
         return progressed
     }
 
-    private fun dispatchRequest(state: ClientState, request: ByteArray): ByteArray? {
+    private fun dispatchRequest(client: Client, state: ClientState, request: ByteArray): ByteArray? {
         val opcode = request[0].toInt() and 0xff
         return when (opcode) {
+            1 -> createWindow(state, request)
+            2 -> changeWindowAttributes(state, request)
             3 -> getWindowAttributes(state, request)
+            4 -> destroyWindow(client, state, request)
+            8 -> mapWindow(client, state, request)
+            10 -> unmapWindow(client, state, request)
+            12 -> configureWindow(client, state, request)
             14 -> getGeometry(state, request)
             15 -> queryTree(state, request)
             16 -> internAtom(state, request)
             17 -> getAtomName(state, request)
             43 -> getInputFocus(state, request)
+            53 -> createPixmap(state, request)
+            54 -> freePixmap(state, request)
+            55 -> createGraphicsContext(state, request)
+            60 -> freeGraphicsContext(state, request)
+            61 -> clearArea(state, request)
+            62 -> copyArea(state, request)
+            72 -> putImage(state, request)
             98 -> queryExtension(state, request)
             99 -> listExtensions(state, request)
             127 -> null
-            else -> buildError(state, if (opcode <= 127) 17 else 1, 0, opcode)
+            else -> buildError(state, if (opcode <= 127) BAD_REQUEST else BAD_IMPLEMENTATION, 0, opcode)
         }
     }
 
+    private fun createWindow(state: ClientState, request: ByteArray): ByteArray? {
+        if (request.size < 32) return buildError(state, BAD_LENGTH, 0, 1)
+        val id = readU32(request, 4, state.byteOrder)
+        val parent = readU32(request, 8, state.byteOrder)
+        val width = readU16(request, 16, state.byteOrder)
+        val height = readU16(request, 18, state.byteOrder)
+        val valueMask = readU32(request, 28, state.byteOrder)
+        if (request.size != 32 + Integer.bitCount(valueMask) * 4) return buildError(state, BAD_LENGTH, 0, 1)
+        if (!framebuffer.hasWindow(parent)) return buildError(state, BAD_WINDOW, parent, 1)
+        if (width == 0 || height == 0) return buildError(state, BAD_VALUE, 0, 1)
+        val x = readI16(request, 12, state.byteOrder)
+        val y = readI16(request, 14, state.byteOrder)
+        val depth = request[1].toInt() and 0xff
+        if (!framebuffer.createWindow(id, parent, x, y, width, height, depth)) {
+            return buildError(state, BAD_ID_CHOICE, id, 1)
+        }
+        return null
+    }
+
+    private fun changeWindowAttributes(state: ClientState, request: ByteArray): ByteArray? {
+        if (request.size < 12) return buildError(state, BAD_LENGTH, 0, 2)
+        val window = readU32(request, 4, state.byteOrder)
+        val mask = readU32(request, 8, state.byteOrder)
+        if (request.size != 12 + Integer.bitCount(mask) * 4) return buildError(state, BAD_LENGTH, 0, 2)
+        if (!framebuffer.hasWindow(window)) return buildError(state, BAD_WINDOW, window, 2)
+        var offset = 12
+        for (bit in 0 until 32) {
+            if ((mask and (1 shl bit)) == 0) continue
+            val value = readU32(request, offset, state.byteOrder)
+            if (bit == 11) state.eventMasks[window] = value
+            offset += 4
+        }
+        return null
+    }
+
+    private fun destroyWindow(client: Client, state: ClientState, request: ByteArray): ByteArray? {
+        if (request.size != 8) return buildError(state, BAD_LENGTH, 0, 4)
+        val window = readU32(request, 4, state.byteOrder)
+        if (!framebuffer.hasWindow(window) || window == PcglX11SetupCodec.ROOT_WINDOW_ID) {
+            return buildError(state, BAD_WINDOW, window, 4)
+        }
+        notifySelected(client, state, window, STRUCTURE_NOTIFY, event(state, 17).apply {
+            putInt(4, window); putInt(8, window)
+        })
+        if (!framebuffer.destroyWindow(window)) return buildError(state, BAD_WINDOW, window, 4)
+        return null
+    }
+
+    private fun mapWindow(client: Client, state: ClientState, request: ByteArray): ByteArray? {
+        if (request.size != 8) return buildError(state, BAD_LENGTH, 0, 8)
+        val window = readU32(request, 4, state.byteOrder)
+        if (!framebuffer.hasWindow(window) || window == PcglX11SetupCodec.ROOT_WINDOW_ID) {
+            return buildError(state, BAD_WINDOW, window, 8)
+        }
+        val parent = framebuffer.parentOf(window) ?: PcglX11SetupCodec.ROOT_WINDOW_ID
+        if (!framebuffer.mapWindow(window)) return buildError(state, BAD_WINDOW, window, 8)
+        notifySelected(client, state, window, STRUCTURE_NOTIFY, event(state, 19).apply {
+            putInt(4, window); putInt(8, window)
+        })
+        notifySelected(client, state, parent, SUBSTRUCTURE_NOTIFY, event(state, 19).apply {
+            putInt(4, parent); putInt(8, window)
+        })
+        if ((state.eventMasks[window] ?: 0) and EXPOSURE != 0) {
+            val geometry = framebuffer.geometry(window)
+            if (geometry != null) {
+                val expose = event(state, 12)
+                expose.putInt(4, window)
+                expose.putShort(8, 0); expose.putShort(10, 0)
+                expose.putShort(12, geometry.width.toShort())
+                expose.putShort(14, geometry.height.toShort())
+                expose.putShort(16, 0)
+                writeResponse(client, expose.array())
+            }
+        }
+        return null
+    }
+
+    private fun unmapWindow(client: Client, state: ClientState, request: ByteArray): ByteArray? {
+        if (request.size != 8) return buildError(state, BAD_LENGTH, 0, 10)
+        val window = readU32(request, 4, state.byteOrder)
+        if (!framebuffer.hasWindow(window) || window == PcglX11SetupCodec.ROOT_WINDOW_ID) {
+            return buildError(state, BAD_WINDOW, window, 10)
+        }
+        val parent = framebuffer.parentOf(window) ?: PcglX11SetupCodec.ROOT_WINDOW_ID
+        if (!framebuffer.unmapWindow(window)) return buildError(state, BAD_WINDOW, window, 10)
+        notifySelected(client, state, window, STRUCTURE_NOTIFY, event(state, 18).apply {
+            putInt(4, window); putInt(8, window); put(12, 0)
+        })
+        notifySelected(client, state, parent, SUBSTRUCTURE_NOTIFY, event(state, 18).apply {
+            putInt(4, parent); putInt(8, window); put(12, 0)
+        })
+        return null
+    }
+
+    private fun configureWindow(client: Client, state: ClientState, request: ByteArray): ByteArray? {
+        if (request.size < 12) return buildError(state, BAD_LENGTH, 0, 12)
+        val window = readU32(request, 4, state.byteOrder)
+        val mask = readU16(request, 8, state.byteOrder)
+        if (request.size != 12 + Integer.bitCount(mask) * 4) return buildError(state, BAD_LENGTH, 0, 12)
+        if (!framebuffer.hasWindow(window) || window == PcglX11SetupCodec.ROOT_WINDOW_ID) {
+            return buildError(state, BAD_WINDOW, window, 12)
+        }
+        var x: Int? = null
+        var y: Int? = null
+        var width: Int? = null
+        var height: Int? = null
+        var offset = 12
+        for (bit in 0 until 7) {
+            if ((mask and (1 shl bit)) == 0) continue
+            val value = readU32(request, offset, state.byteOrder)
+            when (bit) {
+                0 -> x = value.toShort().toInt()
+                1 -> y = value.toShort().toInt()
+                2 -> width = value.coerceIn(1, 4096)
+                3 -> height = value.coerceIn(1, 4096)
+            }
+            offset += 4
+        }
+        if (!framebuffer.configureWindow(window, x, y, width, height)) {
+            return buildError(state, BAD_VALUE, window, 12)
+        }
+        val geometry = framebuffer.geometry(window) ?: return null
+        val notify = event(state, 22)
+        notify.putInt(4, window)
+        notify.putInt(8, window)
+        notify.putShort(12, geometry.x.toShort())
+        notify.putShort(14, geometry.y.toShort())
+        notify.putShort(16, geometry.width.toShort())
+        notify.putShort(18, geometry.height.toShort())
+        notify.putShort(20, 0)
+        notify.putInt(22, 0)
+        notify.put(26, 0)
+        notify.put(27, 0)
+        notifySelected(client, state, window, STRUCTURE_NOTIFY, notify)
+        return null
+    }
+
+    private fun createPixmap(state: ClientState, request: ByteArray): ByteArray? {
+        if (request.size != 16) return buildError(state, BAD_LENGTH, 0, 53)
+        val id = readU32(request, 4, state.byteOrder)
+        val drawable = readU32(request, 8, state.byteOrder)
+        val width = readU16(request, 12, state.byteOrder)
+        val height = readU16(request, 14, state.byteOrder)
+        if (!framebuffer.hasDrawable(drawable)) return buildError(state, BAD_DRAWABLE, drawable, 53)
+        if (!framebuffer.createPixmap(id, width, height, request[1].toInt() and 0xff)) {
+            return buildError(state, BAD_ALLOC, id, 53)
+        }
+        return null
+    }
+
+    private fun freePixmap(state: ClientState, request: ByteArray): ByteArray? {
+        if (request.size != 8) return buildError(state, BAD_LENGTH, 0, 54)
+        val id = readU32(request, 4, state.byteOrder)
+        if (!framebuffer.freePixmap(id)) return buildError(state, BAD_PIXMAP, id, 54)
+        return null
+    }
+
+    private fun createGraphicsContext(state: ClientState, request: ByteArray): ByteArray? {
+        if (request.size < 16) return buildError(state, BAD_LENGTH, 0, 55)
+        val id = readU32(request, 4, state.byteOrder)
+        val drawable = readU32(request, 8, state.byteOrder)
+        val mask = readU32(request, 12, state.byteOrder)
+        if (request.size != 16 + Integer.bitCount(mask) * 4) return buildError(state, BAD_LENGTH, 0, 55)
+        if (!framebuffer.hasDrawable(drawable)) return buildError(state, BAD_DRAWABLE, drawable, 55)
+        if (!framebuffer.createGraphicsContext(id)) return buildError(state, BAD_ID_CHOICE, id, 55)
+        return null
+    }
+
+    private fun freeGraphicsContext(state: ClientState, request: ByteArray): ByteArray? {
+        if (request.size != 8) return buildError(state, BAD_LENGTH, 0, 60)
+        val id = readU32(request, 4, state.byteOrder)
+        if (!framebuffer.freeGraphicsContext(id)) return buildError(state, BAD_GC, id, 60)
+        return null
+    }
+
+    private fun clearArea(state: ClientState, request: ByteArray): ByteArray? {
+        if (request.size != 16) return buildError(state, BAD_LENGTH, 0, 61)
+        val window = readU32(request, 4, state.byteOrder)
+        val x = readI16(request, 8, state.byteOrder)
+        val y = readI16(request, 10, state.byteOrder)
+        val width = readU16(request, 12, state.byteOrder)
+        val height = readU16(request, 14, state.byteOrder)
+        if (!framebuffer.clearArea(window, x, y, width, height)) return buildError(state, BAD_WINDOW, window, 61)
+        return null
+    }
+
+    private fun copyArea(state: ClientState, request: ByteArray): ByteArray? {
+        if (request.size != 28) return buildError(state, BAD_LENGTH, 0, 62)
+        val source = readU32(request, 4, state.byteOrder)
+        val destination = readU32(request, 8, state.byteOrder)
+        val gc = readU32(request, 12, state.byteOrder)
+        if (!framebuffer.hasDrawable(source)) return buildError(state, BAD_DRAWABLE, source, 62)
+        if (!framebuffer.hasDrawable(destination)) return buildError(state, BAD_DRAWABLE, destination, 62)
+        if (!framebuffer.copyArea(
+                source, destination, gc,
+                readI16(request, 16, state.byteOrder), readI16(request, 18, state.byteOrder),
+                readI16(request, 20, state.byteOrder), readI16(request, 22, state.byteOrder),
+                readU16(request, 24, state.byteOrder), readU16(request, 26, state.byteOrder)
+            )
+        ) return buildError(state, BAD_GC, gc, 62)
+        return null
+    }
+
+    private fun putImage(state: ClientState, request: ByteArray): ByteArray? {
+        if (request.size < 24) return buildError(state, BAD_LENGTH, 0, 72)
+        val format = request[1].toInt() and 0xff
+        val drawable = readU32(request, 4, state.byteOrder)
+        val gc = readU32(request, 8, state.byteOrder)
+        val width = readU16(request, 12, state.byteOrder)
+        val height = readU16(request, 14, state.byteOrder)
+        val destinationX = readI16(request, 16, state.byteOrder)
+        val destinationY = readI16(request, 18, state.byteOrder)
+        val leftPad = request[20].toInt() and 0xff
+        val depth = request[21].toInt() and 0xff
+        if (leftPad != 0) return buildError(state, BAD_MATCH, leftPad, 72)
+        if (!framebuffer.hasDrawable(drawable)) return buildError(state, BAD_DRAWABLE, drawable, 72)
+        if (!framebuffer.putImage(
+                drawable, gc, format, width, height, destinationX, destinationY,
+                depth, request.copyOfRange(24, request.size), state.byteOrder
+            )
+        ) return buildError(state, BAD_MATCH, drawable, 72)
+        return null
+    }
+
     private fun getInputFocus(state: ClientState, request: ByteArray): ByteArray {
-        if (request.size != 4) return buildError(state, 16, 0, 43)
+        if (request.size != 4) return buildError(state, BAD_LENGTH, 0, 43)
         val output = replyBuffer(state.byteOrder, 32, 1, 1, state.sequence, 0)
         output.putInt(PcglX11SetupCodec.ROOT_WINDOW_ID)
         repeat(20) { output.put(0) }
@@ -142,21 +392,18 @@ class PcglX11ProtocolServer(
     }
 
     private fun queryExtension(state: ClientState, request: ByteArray): ByteArray {
-        if (request.size < 8) return buildError(state, 16, 0, 98)
-        val nameLength = PcglX11SetupCodec.readU16(request, 4, state.byteOrder)
+        if (request.size < 8) return buildError(state, BAD_LENGTH, 0, 98)
+        val nameLength = readU16(request, 4, state.byteOrder)
         val expectedLength = 8 + PcglX11SetupCodec.align4(nameLength)
-        if (request.size != expectedLength) return buildError(state, 16, nameLength, 98)
+        if (request.size != expectedLength) return buildError(state, BAD_LENGTH, nameLength, 98)
         val output = replyBuffer(state.byteOrder, 32, 1, 0, state.sequence, 0)
-        output.put(0)
-        output.put(0)
-        output.put(0)
-        output.put(0)
+        repeat(4) { output.put(0) }
         repeat(20) { output.put(0) }
         return output.array()
     }
 
     private fun listExtensions(state: ClientState, request: ByteArray): ByteArray {
-        if (request.size != 4) return buildError(state, 16, 0, 99)
+        if (request.size != 4) return buildError(state, BAD_LENGTH, 0, 99)
         val output = replyBuffer(state.byteOrder, 32, 1, 0, state.sequence, 0)
         output.put(0)
         repeat(23) { output.put(0) }
@@ -164,36 +411,43 @@ class PcglX11ProtocolServer(
     }
 
     private fun getGeometry(state: ClientState, request: ByteArray): ByteArray {
-        if (request.size != 8) return buildError(state, 16, 0, 14)
+        if (request.size != 8) return buildError(state, BAD_LENGTH, 0, 14)
         val drawable = readU32(request, 4, state.byteOrder)
-        if (drawable != PcglX11SetupCodec.ROOT_WINDOW_ID) return buildError(state, 9, drawable, 14)
-        val output = replyBuffer(state.byteOrder, 32, 1, 24, state.sequence, 0)
+        val geometry = framebuffer.geometry(drawable) ?: return buildError(state, BAD_DRAWABLE, drawable, 14)
+        val output = replyBuffer(state.byteOrder, 32, 1, geometry.depth, state.sequence, 0)
         output.putInt(PcglX11SetupCodec.ROOT_WINDOW_ID)
-        output.putShort(0)
-        output.putShort(0)
-        output.putShort(screenWidthPx.coerceIn(1, 65535).toShort())
-        output.putShort(screenHeightPx.coerceIn(1, 65535).toShort())
+        output.putShort(geometry.x.toShort())
+        output.putShort(geometry.y.toShort())
+        output.putShort(geometry.width.toShort())
+        output.putShort(geometry.height.toShort())
         output.putShort(0)
         repeat(10) { output.put(0) }
         return output.array()
     }
 
     private fun queryTree(state: ClientState, request: ByteArray): ByteArray {
-        if (request.size != 8) return buildError(state, 16, 0, 15)
+        if (request.size != 8) return buildError(state, BAD_LENGTH, 0, 15)
         val window = readU32(request, 4, state.byteOrder)
-        if (window != PcglX11SetupCodec.ROOT_WINDOW_ID) return buildError(state, 3, window, 15)
-        val output = replyBuffer(state.byteOrder, 32, 1, 0, state.sequence, 0)
+        if (!framebuffer.hasWindow(window)) return buildError(state, BAD_WINDOW, window, 15)
+        val children = framebuffer.children(window)
+        val parent = if (window == PcglX11SetupCodec.ROOT_WINDOW_ID) {
+            PcglX11SetupCodec.ROOT_WINDOW_ID
+        } else {
+            framebuffer.parentOf(window) ?: PcglX11SetupCodec.ROOT_WINDOW_ID
+        }
+        val output = replyBuffer(state.byteOrder, 32 + children.size * 4, 1, 0, state.sequence, children.size)
         output.putInt(PcglX11SetupCodec.ROOT_WINDOW_ID)
-        output.putInt(PcglX11SetupCodec.ROOT_WINDOW_ID)
-        output.putShort(0)
+        output.putInt(parent)
+        output.putShort(children.size.toShort())
         repeat(14) { output.put(0) }
+        children.forEach { output.putInt(it) }
         return output.array()
     }
 
     private fun getWindowAttributes(state: ClientState, request: ByteArray): ByteArray {
-        if (request.size != 8) return buildError(state, 16, 0, 3)
+        if (request.size != 8) return buildError(state, BAD_LENGTH, 0, 3)
         val window = readU32(request, 4, state.byteOrder)
-        if (window != PcglX11SetupCodec.ROOT_WINDOW_ID) return buildError(state, 3, window, 3)
+        if (!framebuffer.hasWindow(window)) return buildError(state, BAD_WINDOW, window, 3)
         val output = replyBuffer(state.byteOrder, 44, 1, 0, state.sequence, 3)
         output.putInt(PcglX11SetupCodec.ROOT_VISUAL_ID)
         output.putShort(1)
@@ -203,21 +457,21 @@ class PcglX11ProtocolServer(
         output.putInt(0)
         output.put(0)
         output.put(0)
-        output.put(2)
+        output.put(if (framebuffer.isMapped(window)) 2 else 0)
         output.put(0)
         output.putInt(PcglX11SetupCodec.ROOT_COLORMAP_ID)
         output.putInt(0)
-        output.putInt(0)
+        output.putInt(state.eventMasks[window] ?: 0)
         output.putShort(0)
         output.putShort(0)
         return output.array()
     }
 
     private fun internAtom(state: ClientState, request: ByteArray): ByteArray {
-        if (request.size < 8) return buildError(state, 16, 0, 16)
-        val nameLength = PcglX11SetupCodec.readU16(request, 4, state.byteOrder)
+        if (request.size < 8) return buildError(state, BAD_LENGTH, 0, 16)
+        val nameLength = readU16(request, 4, state.byteOrder)
         val expectedLength = 8 + PcglX11SetupCodec.align4(nameLength)
-        if (request.size != expectedLength) return buildError(state, 16, nameLength, 16)
+        if (request.size != expectedLength) return buildError(state, BAD_LENGTH, nameLength, 16)
         val name = String(request, 8, nameLength, Charsets.ISO_8859_1)
         val onlyIfExists = request[1].toInt() != 0
         var atom = state.atomsByName[name]
@@ -233,9 +487,9 @@ class PcglX11ProtocolServer(
     }
 
     private fun getAtomName(state: ClientState, request: ByteArray): ByteArray {
-        if (request.size != 8) return buildError(state, 16, 0, 17)
+        if (request.size != 8) return buildError(state, BAD_LENGTH, 0, 17)
         val atom = readU32(request, 4, state.byteOrder)
-        val name = state.namesByAtom[atom] ?: return buildError(state, 5, atom, 17)
+        val name = state.namesByAtom[atom] ?: return buildError(state, BAD_ATOM, atom, 17)
         val nameBytes = name.toByteArray(Charsets.ISO_8859_1)
         val paddedLength = PcglX11SetupCodec.align4(nameBytes.size)
         val output = replyBuffer(state.byteOrder, 32 + paddedLength, 1, 0, state.sequence, paddedLength / 4)
@@ -245,6 +499,25 @@ class PcglX11ProtocolServer(
         repeat(paddedLength - nameBytes.size) { output.put(0) }
         return output.array()
     }
+
+    private fun notifySelected(
+        client: Client,
+        state: ClientState,
+        selectedWindow: Int,
+        mask: Int,
+        event: ByteBuffer
+    ) {
+        if (((state.eventMasks[selectedWindow] ?: 0) and mask) != 0) {
+            writeResponse(client, event.array())
+        }
+    }
+
+    private fun event(state: ClientState, type: Int): ByteBuffer =
+        ByteBuffer.allocate(32).order(state.byteOrder).apply {
+            put(type.toByte())
+            put(0)
+            putShort(state.sequence.toShort())
+        }
 
     private fun buildError(state: ClientState, errorCode: Int, badValue: Int, majorOpcode: Int): ByteArray {
         val output = ByteBuffer.allocate(32).order(state.byteOrder)
@@ -282,7 +555,7 @@ class PcglX11ProtocolServer(
 
     private fun rejectClient(client: Client, state: ClientState, reason: String) {
         runCatching {
-            if (state.setupComplete) writeResponse(client, buildError(state, 16, 0, 0))
+            if (state.setupComplete) writeResponse(client, buildError(state, BAD_LENGTH, 0, 0))
             else writeResponse(client, PcglX11SetupCodec.buildFailure(state.byteOrder, reason))
         }
         transport.disconnect(client)
@@ -292,11 +565,32 @@ class PcglX11ProtocolServer(
         state.pending = if (count >= state.pending.size) ByteArray(0) else state.pending.copyOfRange(count, state.pending.size)
     }
 
+    private fun readU16(bytes: ByteArray, offset: Int, byteOrder: ByteOrder): Int =
+        PcglX11SetupCodec.readU16(bytes, offset, byteOrder)
+
+    private fun readI16(bytes: ByteArray, offset: Int, byteOrder: ByteOrder): Int =
+        readU16(bytes, offset, byteOrder).toShort().toInt()
+
     private fun readU32(bytes: ByteArray, offset: Int, byteOrder: ByteOrder): Int =
         ByteBuffer.wrap(bytes, offset, 4).order(byteOrder).int
 
     private companion object {
         const val MAX_BUFFERED_BYTES = 1024 * 1024
         const val MAX_REQUEST_BYTES = 262140
+        const val BAD_REQUEST = 1
+        const val BAD_VALUE = 2
+        const val BAD_WINDOW = 3
+        const val BAD_PIXMAP = 4
+        const val BAD_ATOM = 5
+        const val BAD_MATCH = 8
+        const val BAD_DRAWABLE = 9
+        const val BAD_ALLOC = 11
+        const val BAD_GC = 13
+        const val BAD_ID_CHOICE = 14
+        const val BAD_LENGTH = 16
+        const val BAD_IMPLEMENTATION = 17
+        const val STRUCTURE_NOTIFY = 1 shl 17
+        const val SUBSTRUCTURE_NOTIFY = 1 shl 19
+        const val EXPOSURE = 1 shl 15
     }
 }
