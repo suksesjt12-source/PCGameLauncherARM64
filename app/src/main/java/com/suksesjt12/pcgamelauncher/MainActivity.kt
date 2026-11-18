@@ -77,7 +77,7 @@ class MainActivity : Activity() {
         val content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
         val title = TextView(this).apply {
-            text = "PC GAME LAUNCHER"
+            text = "PCGL • GAME CENTER"
             textSize = 23f
             setTextColor(Color.WHITE)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
@@ -85,7 +85,7 @@ class MainActivity : Activity() {
         content.addView(title)
 
         val subtitle = TextView(this).apply {
-            text = "ARM64 • Windows game library"
+            text = "Native Android launcher • ARM64 compatibility runtime"
             textSize = 13f
             setTextColor(Color.rgb(155, 166, 187))
             setPadding(0, dp(5), 0, dp(18))
@@ -94,7 +94,7 @@ class MainActivity : Activity() {
 
         val runtimeText = installedRuntime?.let {
             val source = if (RuntimeBootstrapManager.isManaged(it)) {
-                "Winlator Mali Bionic rootfs + Proton x86_64; both archives passed pinned SHA-256 checks."
+                "Verified Bionic Wine runtime package; upstream runtime components are isolated from the launcher UI."
             } else {
                 "Legacy runtime package passed manifest, SHA-256, ELF, and PE checks."
             }
@@ -117,7 +117,7 @@ class MainActivity : Activity() {
                 "\n\n" + runtimeText +
                 "\n\nCOMPONENT MANAGER\nBox64: bundled inside this APK (ARM64)\n" +
                 dxvkText + "\nWine: managed by the in-app runtime installer\n" +
-                "Display backend: XServer/SDL integration is still pending; installation alone does not guarantee visible game output.\n\n" +
+                "Display backend: native PCGL window/render integration is in development; a Wine process starting does not guarantee visible game output.\n\n" +
                 NativeBridge.status() + "\n\nDEVICE / VULKAN\n" + NativeBridge.device()
             textSize = 13f
             setTextColor(Color.rgb(255, 220, 150))
@@ -150,7 +150,6 @@ class MainActivity : Activity() {
         ) { installRuntimeComponents() }, buttonParams())
         content.addView(actionButton("DOWNLOAD / UPDATE OFFICIAL DXVK") { downloadOfficialDxvk() }, buttonParams())
         content.addView(actionButton("TEST BOX64 + WINE") { probeRuntime() }, buttonParams())
-        content.addView(actionButton("OPEN FULL MALI GRAPHICS ENGINE") { openFullMaliEngine() }, buttonParams())
         content.addView(actionButton("SHOW / HIDE FLOATING CONTROLS") { toggleControllerOverlay() }, buttonParams())
         content.addView(actionButton("STOP RUNNING GAME") { stopRunningGame() }, buttonParams())
 
@@ -181,7 +180,7 @@ class MainActivity : Activity() {
         renderLibrary(list)
 
         val footer = TextView(this).apply {
-            text = "PCGameLauncherARM64 • v0.9.0\nAutomatic official DXVK manager, bundled Box64 and Wine runtime import."
+            text = "PCGL ARM64 • independent launcher project\nBox64 host • Wine runtime manager • per-game profiles"
             textSize = 11f
             setTextColor(Color.rgb(120, 132, 153))
             gravity = Gravity.CENTER
@@ -209,33 +208,6 @@ class MainActivity : Activity() {
     }
 
     private fun matchWidth() = LinearLayout.LayoutParams(-1, -2)
-
-    private fun openFullMaliEngine() {
-        val enginePackage = "com.suksesjt12.pcgamelauncher.engine"
-        val launchIntent = packageManager.getLaunchIntentForPackage(enginePackage)
-        if (launchIntent != null) {
-            startActivity(launchIntent)
-            return
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle("Full Mali graphics engine belum dipasang")
-            .setMessage(
-                "Engine penuh dibangun terpisah agar instalasi launcher lama dan data game tidak tertimpa. " +
-                    "Buka GitHub Actions, unduh artifact PCGameLauncher-Mali-Engine-debug, ekstrak APK, " +
-                    "lalu pasang aplikasi pendamping tersebut."
-            )
-            .setPositiveButton("Buka GitHub Actions") { _, _ ->
-                startActivity(
-                    Intent(
-                        Intent.ACTION_VIEW,
-                        Uri.parse("https://github.com/suksesjt12-source/PCGameLauncherARM64/actions/workflows/pcgl-mali-engine.yml")
-                    )
-                )
-            }
-            .setNegativeButton("Tutup", null)
-            .show()
-    }
 
     private fun chooseExe() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
