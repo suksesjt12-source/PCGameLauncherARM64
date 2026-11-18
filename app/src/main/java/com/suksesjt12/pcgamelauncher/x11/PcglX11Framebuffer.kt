@@ -273,6 +273,59 @@ internal class PcglX11Framebuffer(
     }
 
     @Synchronized
+    fun getImage(
+        drawableId: Int,
+        sourceX: Int,
+        sourceY: Int,
+        width: Int,
+        height: Int,
+        byteOrder: ByteOrder
+    ): ByteArray? {
+        if (width !in 1..4096 || height !in 1..4096 ||
+            width.toLong() * height * 4L > MAX_FRAME_BYTES
+        ) return null
+
+        val sourcePixels = if (drawableId == PcglX11SetupCodec.ROOT_WINDOW_ID) {
+            composeScreen()
+        } else {
+            drawables[drawableId]?.pixels
+        } ?: return null
+        val sourceWidth = if (drawableId == PcglX11SetupCodec.ROOT_WINDOW_ID) screenWidth else drawables[drawableId]!!.width
+        val sourceHeight = if (drawableId == PcglX11SetupCodec.ROOT_WINDOW_ID) screenHeight else drawables[drawableId]!!.height
+        val result = ByteArray(width * height * 4)
+
+        for (row in 0 until height) {
+            val y = sourceY + row
+            if (y !in 0 until sourceHeight) continue
+            for (column in 0 until width) {
+                val x = sourceX + column
+                if (x !in 0 until sourceWidth) continue
+                val source = (y * sourceWidth + x) * 4
+                val target = (row * width + column) * 4
+                if (byteOrder == ByteOrder.LITTLE_ENDIAN) {
+                    result[target] = sourcePixels[source + 2]
+                    result[target + 1] = sourcePixels[source + 1]
+                    result[target + 2] = sourcePixels[source]
+                    result[target + 3] = 0
+                } else {
+                    result[target] = 0
+                    result[target + 1] = sourcePixels[source]
+                    result[target + 2] = sourcePixels[source + 1]
+                    result[target + 3] = sourcePixels[source + 2]
+                }
+            }
+        }
+        return result
+    }
+
+    private fun composeScreen(): ByteArray {
+        val output = ByteArray(screenWidth * screenHeight * 4)
+        for (pixel in 0 until screenWidth * screenHeight) output[pixel * 4 + 3] = 0xff.toByte()
+        drawChildren(PcglX11SetupCodec.ROOT_WINDOW_ID, 0, 0, output)
+        return output
+    }
+
+    @Synchronized
     fun fillRectangles(
         drawableId: Int,
         gcId: Int,
@@ -328,9 +381,7 @@ internal class PcglX11Framebuffer(
     }
 
     private fun publishFrame() {
-        val output = ByteArray(screenWidth * screenHeight * 4)
-        for (pixel in 0 until screenWidth * screenHeight) output[pixel * 4 + 3] = 0xff.toByte()
-        drawChildren(PcglX11SetupCodec.ROOT_WINDOW_ID, 0, 0, output)
+        val output = composeScreen()
         runCatching { frameSink(PcglWindowFrame(screenWidth, screenHeight, output)) }
     }
 
