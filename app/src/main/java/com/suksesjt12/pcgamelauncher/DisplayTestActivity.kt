@@ -170,6 +170,115 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
         setContentView(root)
     }
 
+    private val gameStatusPoll = object : Runnable {
+        override fun run() {
+            if (isDestroyed || !pendingGameLaunchStarted) return
+            if (RuntimeExecutionManager.isGameRunning()) {
+                uiHandler.postDelayed(this, 1000L)
+            } else {
+                pendingGameLaunchStarted = false
+                ControllerOverlayManager.hide()
+                statusView.text = "GAME PROCESS EXITED\\nExit code: " +
+                    (RuntimeExecutionManager.lastGameExitCode()?.toString() ?: "unknown") +
+                    "\\nCheck the per-game log for the Wine/X11 result."
+                frameView.text = "X11 display session stopped after the game process exited."
+            }
+        }
+    }
+
+    private fun startDiagnosticX11Session() {
+        if (!displayReady) {
+            statusView.text = "X11 DISPLAY\\nAndroid Surface/EGL is not ready."
+            return
+        }
+        if (PcglX11DisplaySession.isRunning()) {
+            statusView.text = "X11 DISPLAY\\nAn authenticated PCGL X11 session is already active."
+            return
+        }
+        try {
+            val workspace = File(filesDir, "pcgl/containers/.x11-diagnostic")
+            val session = PcglX11DisplaySession.start(
+                context = this,
+                prefix = workspace,
+                width = surfaceWidth,
+                height = surfaceHeight
+            ) { frame -> pendingX11Frame.set(frame) }
+            statusView.text = "AUTHENTICATED X11 SERVER ACTIVE\\nDISPLAY=${session.displayEndpoint}"
+            frameView.text = "XAUTHORITY: ${session.xAuthorityFile.absolutePath}\\nLoopback only; this test server is not a complete accelerated game renderer."
+        } catch (error: Exception) {
+            PcglX11DisplaySession.stop()
+            statusView.text = "X11 START FAILED\\n" + (error.message ?: error.javaClass.simpleName)
+        }
+    }
+
+    private fun stopX11Session() {
+        if (RuntimeExecutionManager.isGameRunning()) {
+            statusView.text = "STOP THE GAME PROCESS BEFORE STOPPING ITS DISPLAY."
+            return
+        }
+        PcglX11DisplaySession.stop()
+        pendingX11Frame.set(null)
+        statusView.text = "PCGL X11 DISPLAY STOPPED"
+        frameView.text = NativeBridge.displayInfo()
+    }
+
+    private fun startPendingGameIfRequested() {
+        if (pendingGameLaunchStarted) return
+        val request = PcglPendingGameLaunch.take() ?: return
+        pendingGameLaunchStarted = true
+        statusView.text = "PREPARING GAME DISPLAY\\nStarting authenticated X11 session..."
+        Thread {
+            var session: PcglX11DisplaySession.Session? = null
+            val launch = try {
+                session = PcglX11DisplaySession.start(
+                    context = applicationContext,
+                    prefix = request.profile.directory,
+                    width = surfaceWidth,
+                    height = surfaceHeight
+                ) { frame -> pendingX11Frame.set(frame) }
+                RuntimeExecutionManager.launchWindowsGame(
+                    context = applicationContext,
+                    runtime = request.runtime,
+                    profile = request.profile,
+                    executable = request.executable,
+                    arguments = request.arguments
+                )
+            } catch (error: Exception) {
+                RuntimeExecutionManager.LaunchResult(
+                    false, null, null, error.message ?: error.javaClass.simpleName
+                )
+            }
+            runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
+                if (!launch.success) {
+                    PcglX11DisplaySession.stop()
+                    pendingGameLaunchStarted = false
+                    statusView.text = "GAME LAUNCH FAILED\\n" + launch.message
+                    frameView.text = launch.logFile?.absolutePath ?: "No game log was created."
+                    return@runOnUiThread
+                }
+
+                val activeDisplay = session
+                statusView.text = "GAME PROCESS STARTED\\n${request.gameName}\\n" + launch.message
+                frameView.text = "Executable: ${request.executable.name}\\nLog: ${launch.logFile?.absolutePath ?: "not available"}"
+                if (activeDisplay != null) {
+                    frameView.append("\\nDISPLAY=${activeDisplay.displayEndpoint}")
+                }
+                if (android.provider.Settings.canDrawOverlays(this)) {
+                    ControllerOverlayManager.show(this, RuntimeExecutionManager.controllerSettings())
+                } else {
+                    frameView.append("\\nAllow display-over-other-apps to use the touch controls.")
+                }
+                uiHandler.removeCallbacks(gameStatusPoll)
+                uiHandler.postDelayed(gameStatusPoll, 1000L)
+            }
+        }.apply {
+            name = "PCGL-Authenticated-Game-Launch"
+            isDaemon = true
+            start()
+        }
+    }
+
     private fun runX11ProtocolSelfTest() {
         if (x11TestRunning) return
         x11TestRunning = true
