@@ -15,7 +15,7 @@ PCGL is not a rebranded Winlator application. It may consume compatible open-sou
 - DXVK component manager: implemented.
 - Device diagnostics and keyboard/mouse overlay: implemented with limitations documented in source.
 - Native Android Surface/EGL lifecycle and OpenGL ES diagnostic rendering: implemented as a proof of concept behind the `PcglDisplayBackend` interface.
-- Wine/XServer/SDL game-window bridge: not yet implemented.
+- PCGL-namespaced X11 AF_UNIX/epoll transport and dispatcher interface: added; protocol core and game-window bridge remain unimplemented.
 - SDL input/gamepad bridge: not yet implemented; current overlay maps to keyboard/mouse.
 - End-to-end visible game rendering: not yet verified.
 
