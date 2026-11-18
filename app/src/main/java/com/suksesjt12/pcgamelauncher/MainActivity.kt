@@ -830,7 +830,7 @@ class MainActivity : Activity() {
     private fun initializeWinePrefix(game: GameEntry) {
         val runtime = installedRuntime
         if (runtime == null) {
-            showMessage("Runtime belum tersedia", "Impor paket Wine runtime schema v2 terlebih dahulu.")
+            showMessage("Runtime belum tersedia", "Tekan INSTALL RUNTIME COMPONENTS AUTOMATICALLY terlebih dahulu.")
             return
         }
 
@@ -853,7 +853,7 @@ class MainActivity : Activity() {
 
     private fun requestGameLaunch(game: GameEntry) {
         if (installedRuntime == null) {
-            showMessage("Runtime belum tersedia", "Impor paket Wine runtime schema v2 terlebih dahulu.")
+            showMessage("Runtime belum tersedia", "Tekan INSTALL RUNTIME COMPONENTS AUTOMATICALLY terlebih dahulu.")
             return
         }
 
