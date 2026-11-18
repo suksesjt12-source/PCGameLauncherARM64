@@ -36,6 +36,16 @@ Box64 is built for Android ARM64 and bundled in the APK. On first setup, the app
 
 The older schema-v2 ZIP importer remains in the source for backward compatibility, but it is no longer the normal setup path. Details and checksums are documented in [docs/runtime-package-format.md](docs/runtime-package-format.md).
 
+## Full Mali graphics backend build
+
+The repository now also includes a separate workflow that builds the complete Winlator Mali engine from a pinned upstream source revision. This backend contains the XServer/window lifecycle, SDL integration, EGL renderer, native Winlator graphics bridge, and audio components that are not present in the lightweight launcher implementation.
+
+1. Open **Actions**.
+2. Run **PC Game Launcher Mali Engine**.
+3. Download the `PCGameLauncher-Mali-Engine-debug` artifact after the run succeeds.
+
+This is a separate companion APK with package ID `com.suksesjt12.pcgamelauncher.engine` so it does not overwrite the existing lightweight launcher or its saved data. It is an initial engine-integration milestone, not yet a merged launcher: game entries and containers are not automatically shared between the two apps. The engine build bundles the upstream base image and still needs first-launch setup and testing on a real Helio G100/Mali device. See [docs/winlator-mali-engine.md](docs/winlator-mali-engine.md).
+
 ## Current limitations
 
 Game data directories can now be copied recursively into the private game workspace.
