@@ -489,7 +489,7 @@ class PcglX11ProtocolServer(
         if (request.size != 20) return buildError(state, BAD_LENGTH, 0, 73)
         val format = request[1].toInt() and 0xff
         val drawable = readU32(request, 4, state.byteOrder)
-        if (format != Z_PIXMAP) return buildError(state, BAD_MATCH, format, 73)
+        if (format != 2) return buildError(state, BAD_MATCH, format, 73)
         if (!framebuffer.hasDrawable(drawable)) return buildError(state, BAD_DRAWABLE, drawable, 73)
         val width = readU16(request, 12, state.byteOrder)
         val height = readU16(request, 14, state.byteOrder)
