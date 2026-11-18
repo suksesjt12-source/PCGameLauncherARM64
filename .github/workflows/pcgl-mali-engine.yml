@@ -1,0 +1,125 @@
+name: PC Game Launcher Mali Engine
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - ".github/workflows/pcgl-mali-engine.yml"
+      - "docs/winlator-mali-engine.md"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build full Mali graphics backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout launcher repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout pinned Winlator Mali engine
+        uses: actions/checkout@v4
+        with:
+          repository: GunaCharanTeja/WinlatorMali
+          ref: 0411a4b602ed00d71bef52e6a7ccb82a8e709b1a
+          path: third_party/WinlatorMali
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: third_party/WinlatorMali/**/*.gradle*
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager \
+            "platforms;android-34" \
+            "build-tools;35.0.0" \
+            "cmake;3.22.1" \
+            "ndk;29.0.14206865"
+
+      - name: Brand the engine build for PC Game Launcher
+        working-directory: third_party/WinlatorMali
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("app/build.gradle")
+          source = path.read_text(encoding="utf-8")
+
+          replacements = [
+              ('applicationId "com.winlator.mali"',
+               'applicationId "com.suksesjt12.pcgamelauncher"'),
+              ('resValue "string", "app_name", "Winlator Mali"',
+               'resValue "string", "app_name", "PC Game Launcher Engine"'),
+              ("versionCode 23", "versionCode 24"),
+              ("versionName \"1.2.1 Bionic\"", "versionName \"1.0.0 PCGL Mali Engine\""),
+          ]
+
+          for old, new in replacements:
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one branding target {old!r}; found {count}")
+              source = source.replace(old, new, 1)
+
+          debug_block = """        debug {
+                  minifyEnabled false
+                  signingConfig signingConfigs.debug
+              }"""
+          debug_replacement = """        debug {
+                  minifyEnabled false
+                  applicationIdSuffix ".engine"
+                  signingConfig signingConfigs.debug
+              }"""
+          if source.count(debug_block) != 1:
+              raise SystemExit("Could not uniquely locate the debug build type.")
+          source = source.replace(debug_block, debug_replacement, 1)
+          path.write_text(source, encoding="utf-8")
+          PY
+          chmod +x ./gradlew
+
+      - name: Build complete Winlator Mali backend APK
+        working-directory: third_party/WinlatorMali
+        run: ./gradlew :app:assembleStandardDebug --no-daemon --stacktrace
+
+      - name: Verify display, native renderer and runtime assets
+        working-directory: third_party/WinlatorMali
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/standard/debug/app-standard-debug.apk"
+          test -s "$APK"
+          unzip -l "$APK" | grep -q 'lib/arm64-v8a/libwinlator.so'
+          unzip -l "$APK" | grep -q 'assets/imagefs.tzst'
+          unzip -l "$APK" | grep -q 'classes'
+          AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt"
+          "$AAPT" dump badging "$APK" > /tmp/pcgl-badging.txt
+          grep -q "package: name='com.suksesjt12.pcgamelauncher.engine'" /tmp/pcgl-badging.txt
+          grep -q "application-label:'PC Game Launcher Engine'" /tmp/pcgl-badging.txt
+          sha256sum "$APK" | tee "$GITHUB_WORKSPACE/pcgl-mali-engine.sha256"
+          cp "$APK" "$GITHUB_WORKSPACE/PCGameLauncher-Mali-Engine-debug.apk"
+
+      - name: Upload full Mali engine APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: PCGameLauncher-Mali-Engine-debug
+          path: |
+            PCGameLauncher-Mali-Engine-debug.apk
+            pcgl-mali-engine.sha256
+          if-no-files-found: error
+          retention-days: 14
