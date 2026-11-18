@@ -173,6 +173,7 @@ class PcglX11ProtocolServer(
             62 -> copyArea(state, request)
             70 -> polyFillRectangle(state, request)
             72 -> putImage(state, request)
+            73 -> getImage(state, request)
             98 -> queryExtension(state, request)
             99 -> listExtensions(state, request)
             127 -> null
@@ -469,6 +470,36 @@ class PcglX11ProtocolServer(
             )
         ) return buildError(state, BAD_MATCH, drawable, 72)
         return null
+    }
+
+    private fun getImage(state: ClientState, request: ByteArray): ByteArray? {
+        if (request.size != 20) return buildError(state, BAD_LENGTH, 0, 73)
+        val format = request[1].toInt() and 0xff
+        val drawable = readU32(request, 4, state.byteOrder)
+        if (format != Z_PIXMAP) return buildError(state, BAD_MATCH, format, 73)
+        if (!framebuffer.hasDrawable(drawable)) return buildError(state, BAD_DRAWABLE, drawable, 73)
+        val width = readU16(request, 12, state.byteOrder)
+        val height = readU16(request, 14, state.byteOrder)
+        val image = framebuffer.getImage(
+            drawable,
+            readI16(request, 8, state.byteOrder),
+            readI16(request, 10, state.byteOrder),
+            width,
+            height,
+            state.byteOrder
+        ) ?: return buildError(state, BAD_MATCH, drawable, 73)
+        val output = replyBuffer(
+            state.byteOrder,
+            32 + image.size,
+            1,
+            24,
+            state.sequence,
+            image.size / 4
+        )
+        output.putInt(PcglX11SetupCodec.ROOT_VISUAL_ID)
+        repeat(20) { output.put(0) }
+        output.put(image)
+        return output.array()
     }
 
     private fun getInputFocus(state: ClientState, request: ByteArray): ByteArray {
