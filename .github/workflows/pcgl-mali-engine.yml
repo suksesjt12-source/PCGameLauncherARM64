@@ -78,9 +78,9 @@ jobs:
               source = source.replace(old, new, 1)
 
           debug_block = """        debug {
-                  minifyEnabled false
-                  signingConfig signingConfigs.debug
-              }"""
+              minifyEnabled false
+              signingConfig signingConfigs.debug
+          }"""
           debug_replacement = """        debug {
                   minifyEnabled false
                   applicationIdSuffix ".engine"
