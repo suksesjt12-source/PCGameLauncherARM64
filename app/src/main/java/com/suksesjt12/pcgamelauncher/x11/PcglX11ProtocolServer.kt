@@ -600,7 +600,7 @@ class PcglX11ProtocolServer(
         output.put(value)
         repeat(paddedLength - value.size) { output.put(0) }
         if (delete && bytesAfter == 0 && propertyStore.remove(window, propertyAtom)) {
-            notifyPropertyChange(client, state, window, propertyAtom, PROPERTY_DELETE)
+            notifyPropertyChange(window, propertyAtom, PROPERTY_DELETE)
         }
         return output.array()
     }
