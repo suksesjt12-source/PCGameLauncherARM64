@@ -48,3 +48,8 @@ Apache Commons Compress: https://commons.apache.org/proper/commons-compress/
 
 DXVK and other optional graphics components retain their respective upstream
 licenses. Their license texts must accompany any redistributed component package.
+
+
+## Full Winlator Mali engine companion build
+
+The `PC Game Launcher Mali Engine` workflow checks out and builds the Winlator Mali source at the pinned revision `0411a4b602ed00d71bef52e6a7ccb82a8e709b1a` from https://github.com/GunaCharanTeja/WinlatorMali. The upstream repository's MIT license and bundled third-party notices are retained with the source checkout. The engine APK also incorporates dependencies and runtime content with their own licenses; consult the upstream `LICENSE`, app notices, and each component's license before redistribution.
