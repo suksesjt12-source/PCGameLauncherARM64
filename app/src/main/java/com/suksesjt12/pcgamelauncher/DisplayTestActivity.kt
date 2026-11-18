@@ -412,9 +412,9 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
                 for (x in 0 until 64) {
                     val offset = (y * 64 + x) * 4
                     val bright = ((x / 8) + (y / 8)) % 2 == 0
-                    uploadPixels[offset] = if (bright) 0xff.toByte() else 0x20
-                    uploadPixels[offset + 1] = if (bright) 0x40 else 0xc0.toByte()
-                    uploadPixels[offset + 2] = if (bright) 0xc0.toByte() else 0x40
+                    uploadPixels[offset] = if (bright) 0xff.toByte() else 0x20.toByte()
+                    uploadPixels[offset + 1] = if (bright) 0x40.toByte() else 0xc0.toByte()
+                    uploadPixels[offset + 2] = if (bright) 0xc0.toByte() else 0x40.toByte()
                     uploadPixels[offset + 3] = 0xff.toByte()
                 }
             }
