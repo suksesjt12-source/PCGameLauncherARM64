@@ -330,14 +330,14 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
                     win32TestButton.isEnabled = true
                     PcglX11DisplaySession.stop()
                     pendingX11Frame.set(null)
-                    statusView.text = "WIN32 GUI TEST FAILED\n\${result.message}"
+                    statusView.text = "WIN32 GUI TEST FAILED\n${result.message}"
                     frameView.text = result.logFile?.absolutePath ?: "No test log was created."
                     return@runOnUiThread
                 }
 
                 pendingGameLaunchStarted = true
-                statusView.text = "WIN32 GUI TEST PROCESS STARTED\n\${result.message}"
-                frameView.text = "Log: \${result.logFile?.absolutePath ?: "not available"}\nObserve the display area for the PCGL test window. A running process is not proof that X11 accepted or displayed the window."
+                statusView.text = "WIN32 GUI TEST PROCESS STARTED\n${result.message}"
+                frameView.text = "Log: ${result.logFile?.absolutePath ?: "not available"}\nObserve the display area for the PCGL test window. A running process is not proof that X11 accepted or displayed the window."
                 if (android.provider.Settings.canDrawOverlays(this)) {
                     ControllerOverlayManager.show(this, RuntimeExecutionManager.controllerSettings())
                 } else {

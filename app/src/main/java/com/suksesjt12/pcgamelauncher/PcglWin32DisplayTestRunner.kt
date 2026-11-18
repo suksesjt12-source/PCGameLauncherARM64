@@ -57,7 +57,7 @@ object PcglWin32DisplayTestRunner {
                     val log = File(profile.directory, "logs/wineboot.log")
                     return Result(
                         false,
-                        "Wine prefix initialization failed at \${prefixResult.stage}. \${prefixResult.output}",
+                        "Wine prefix initialization failed at ${prefixResult.stage}. ${prefixResult.output}",
                         log.takeIf { it.isFile }
                     )
                 }
@@ -118,7 +118,7 @@ object PcglWin32DisplayTestRunner {
             } else {
                 Result(
                     true,
-                    "Box64/Wine process started with DISPLAY=\${session.displayEndpoint}. This is not yet proof that the window was rendered.",
+                    "Box64/Wine process started with DISPLAY=${session.displayEndpoint}. This is not yet proof that the window was rendered.",
                     launch.logFile
                 )
             }

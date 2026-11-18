@@ -37,10 +37,12 @@ object PcglX11DisplaySession {
         }
 
         val imageFs = File(context.filesDir, "imagefs").canonicalFile
-        require(imageFs.isDirectory) { "Install the Wine runtime before starting the game display." }
+        // TCP display mode does not need an imagefs socket directory. Use the Wine root
+        // when present, or the already validated per-game workspace for imported runtimes.
+        val x11RuntimeRoot = if (imageFs.isDirectory) imageFs else safePrefix
 
         val nextServer = PcglX11ProtocolServer(
-            runtimeRoot = imageFs,
+            runtimeRoot = x11RuntimeRoot,
             screenWidthPx = width.coerceIn(320, 1920),
             screenHeightPx = height.coerceIn(240, 1200),
             tcpPort = X11_TCP_PORT,
