@@ -25,6 +25,7 @@ object ControllerOverlayManager {
     private var windowManager: WindowManager? = null
     private var rootView: View? = null
     private val pressedKeys = linkedSetOf<Int>()
+    private val pressedMouseButtons = linkedSetOf<Int>()
 
     fun isShowing(): Boolean = rootView != null
 
@@ -81,15 +82,19 @@ object ControllerOverlayManager {
         val row1 = LinearLayout(app).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         val row2 = LinearLayout(app).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         val row3 = LinearLayout(app).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        val row4 = LinearLayout(app).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         addButton(row1, app, "Y", keys[3], buttonDp)
         addButton(row1, app, "X", keys[2], buttonDp)
         addButton(row2, app, "B", keys[1], buttonDp)
         addButton(row2, app, "A", keys[0], buttonDp)
         addButton(row3, app, "START", 0x0D, (buttonDp * 0.82f).roundToInt())
         addButton(row3, app, "ESC", 0x1B, (buttonDp * 0.82f).roundToInt())
+        addMouseButton(row4, app, "LMB", 1, buttonDp)
+        addMouseButton(row4, app, "RMB", 3, buttonDp)
         actions.addView(row1)
         actions.addView(row2)
         actions.addView(row3)
+        actions.addView(row4)
         body.addView(actions, LinearLayout.LayoutParams(dp(app, buttonDp * 2 + 14), -2))
 
         body.addView(MouseLookPad(app, settings.mouseSensitivity),
@@ -147,6 +152,39 @@ object ControllerOverlayManager {
         })
     }
 
+    private fun addMouseButton(parent: LinearLayout, context: Context, label: String, button: Int, sizeDp: Int) {
+        val view = TextView(context).apply {
+            text = label
+            textSize = 9f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            isClickable = true
+            background = rounded(Color.argb(225, 65, 82, 108), dp(context, 6))
+            setOnTouchListener { v, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        synchronized(pressedMouseButtons) {
+                            if (pressedMouseButtons.add(button)) WineInputBridge.sendMouseButton(button, true)
+                        }
+                        true
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        synchronized(pressedMouseButtons) {
+                            if (pressedMouseButtons.remove(button)) WineInputBridge.sendMouseButton(button, false)
+                        }
+                        v.performClick()
+                        true
+                    }
+                    else -> true
+                }
+            }
+        }
+        val height = dp(context, (sizeDp * 0.72f).roundToInt())
+        parent.addView(view, LinearLayout.LayoutParams(dp(context, sizeDp), height).apply {
+            setMargins(dp(context, 2), dp(context, 1), dp(context, 2), dp(context, 1))
+        })
+    }
+
     private fun pressKey(key: Int) {
         synchronized(pressedKeys) {
             if (pressedKeys.add(key)) WineInputBridge.sendKey(key, true)
@@ -163,6 +201,10 @@ object ControllerOverlayManager {
         synchronized(pressedKeys) {
             pressedKeys.forEach { WineInputBridge.sendKey(it, false) }
             pressedKeys.clear()
+        }
+        synchronized(pressedMouseButtons) {
+            pressedMouseButtons.forEach { WineInputBridge.sendMouseButton(it, false) }
+            pressedMouseButtons.clear()
         }
         val old = rootView ?: return
         try { windowManager?.removeView(old) } catch (_: Exception) {}
