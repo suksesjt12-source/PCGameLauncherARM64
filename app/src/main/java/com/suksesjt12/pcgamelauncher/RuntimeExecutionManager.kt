@@ -1,6 +1,7 @@
 package com.suksesjt12.pcgamelauncher
 
 import android.content.Context
+import com.suksesjt12.pcgamelauncher.x11.PcglX11DisplaySession
 import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
@@ -110,6 +111,7 @@ object RuntimeExecutionManager {
         command.add(runtime.wine64.absolutePath)
         command.add(targetExe.absolutePath)
         command.addAll(arguments)
+        val displaySession = PcglX11DisplaySession.currentSession()
         val inputHelper = installInputHelper(context, profile)
         val inputEndpoint = if (inputHelper != null) WineInputBridge.start() else null
         var inputHelperProcess: Process? = null
@@ -133,7 +135,9 @@ object RuntimeExecutionManager {
                     prefix = prefixRoot,
                     environment = this,
                     audioMode = gameSettings.audioMode,
-                    pulseLatencyMs = gameSettings.pulseLatencyMs
+                    pulseLatencyMs = gameSettings.pulseLatencyMs,
+                    displayEndpoint = displaySession?.displayEndpoint,
+                    xAuthorityFile = displaySession?.xAuthorityFile
                 )
                 if (dxvkEnabled && dxvkConfig != null) {
                     val dxvkCache = File(prefixRoot, "shader-cache/dxvk")
@@ -201,6 +205,7 @@ object RuntimeExecutionManager {
                     }
                     WineInputBridge.stop()
                     ControllerOverlayManager.hide()
+                    PcglX11DisplaySession.stop()
                 } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
                 }
@@ -214,7 +219,17 @@ object RuntimeExecutionManager {
                 true,
                 System.currentTimeMillis().toString(),
                 logFile,
-                "Proses Box64/Wine berhasil dimulai. Ini hanya mengonfirmasi proses guest berjalan, bukan tampilan game. Backend XServer/SDL belum aktif pada launcher ini; game grafis kemungkinan tidak akan terlihat sampai subsistem layar diintegrasikan.\n$inputStatus\nInput ini memetakan tombol virtual ke keyboard/mouse Windows; bukan perangkat XInput/SDL."
+                buildString {
+                    append("Proses Box64/Wine berhasil dimulai. Ini hanya mengonfirmasi proses guest berjalan, bukan bahwa game berhasil dirender.")
+                    if (displaySession != null && PcglX11DisplaySession.isRunning()) {
+                        append("\\nX11 DISPLAY=${displaySession.displayEndpoint} dan XAUTHORITY dikonfigurasi melalui sesi PCGL aktif.")
+                        append("\\nServer saat ini masih merupakan subset software X11; GLX/DRI3/Vulkan WSI belum selesai, sehingga game Direct3D belum dijamin tampil.")
+                    } else {
+                        append("\\nDISPLAY tidak diaktifkan karena tidak ada sesi X11 PCGL aktif. Game grafis belum akan terlihat.")
+                    }
+                    append("\\n$inputStatus")
+                    append("\\nInput helper saat ini mengirim keyboard/mouse; belum mengemulasikan SDL/XInput gamepad.")
+                }
             )
         } catch (error: IOException) {
             WineInputBridge.stop()
@@ -290,6 +305,7 @@ object RuntimeExecutionManager {
                 activeInputHelperProcess = null
                 activeControllerSettings = null
                 ControllerOverlayManager.hide()
+                PcglX11DisplaySession.stop()
             }
             Result(stopped, "Stop game", null, if (stopped) "Permintaan penghentian dikirim." else "Proses belum berhenti.")
         } catch (error: Exception) {
