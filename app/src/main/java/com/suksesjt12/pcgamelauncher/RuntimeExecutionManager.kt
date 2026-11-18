@@ -338,7 +338,9 @@ object RuntimeExecutionManager {
     fun initializeWinePrefix(
         context: Context,
         runtime: RuntimePackageManager.RuntimeInfo,
-        prefix: File
+        prefix: File,
+        displayEndpoint: String? = null,
+        xAuthorityFile: File? = null
     ): Result {
         val containerRoot = File(context.filesDir, "pcgl/containers").canonicalFile
         val target = prefix.canonicalFile
@@ -357,7 +359,9 @@ object RuntimeExecutionManager {
             prefix = target,
             guestArguments = listOf(runtime.winebootExe.absolutePath, "-u"),
             logName = "wineboot.log",
-            timeoutSeconds = 180
+            timeoutSeconds = 180,
+            displayEndpoint = displayEndpoint,
+            xAuthorityFile = xAuthorityFile
         )
     }
 
@@ -367,7 +371,9 @@ object RuntimeExecutionManager {
         prefix: File,
         guestArguments: List<String>,
         logName: String,
-        timeoutSeconds: Long
+        timeoutSeconds: Long,
+        displayEndpoint: String? = null,
+        xAuthorityFile: File? = null
     ): Result {
         val engine = bundledBox64(context)
         if (!engine.isFile || !engine.canExecute()) {
@@ -411,7 +417,9 @@ object RuntimeExecutionManager {
                     context = context,
                     runtime = runtime,
                     prefix = prefix,
-                    environment = this
+                    environment = this,
+                    displayEndpoint = displayEndpoint,
+                    xAuthorityFile = xAuthorityFile
                 )
             }
 
