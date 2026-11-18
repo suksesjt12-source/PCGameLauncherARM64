@@ -24,6 +24,7 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var renderHandler: Handler
     private lateinit var statusView: TextView
     private lateinit var frameView: TextView
+    private val displayBackend: PcglDisplayBackend = PcglEglSurfaceBackend()
 
     @Volatile private var displayReady = false
     @Volatile private var activityResumed = false
@@ -33,10 +34,10 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
     private val frameTask = object : Runnable {
         override fun run() {
             if (!displayReady || isFinishing || isDestroyed) return
-            val ok = try { NativeBridge.renderDisplayFrame(frameIndex) } catch (_: Throwable) { false }
+            val ok = try { displayBackend.renderFrame(frameIndex) } catch (_: Throwable) { false }
             if (!ok) {
                 displayReady = false
-                val details = runCatching { NativeBridge.displayInfo() }.getOrDefault("Native display bridge unavailable.")
+                val details = runCatching { displayBackend.details() }.getOrDefault("Native display bridge unavailable.")
                 runOnUiThread {
                     statusView.text = "RENDER STOPPED\n" + details
                     frameView.text = "Frame submission stopped."
@@ -103,7 +104,7 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
         val height = holder.surfaceFrame.height().coerceAtLeast(1)
         renderHandler.post {
             val result = try {
-                NativeBridge.createDisplaySurface(surface, width, height)
+                displayBackend.attach(surface, width, height).details
             } catch (error: Throwable) {
                 "ERROR: " + (error.message ?: error.javaClass.simpleName)
             }
@@ -129,7 +130,7 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
         if (width < 1 || height < 1) return
         renderHandler.post {
-            if (displayReady && !NativeBridge.resizeDisplaySurface(width, height)) {
+            if (displayReady && !displayBackend.resize(width, height)) {
                 val details = NativeBridge.displayInfo()
                 runOnUiThread {
                     if (!isDestroyed) statusView.text = "PCGL RESIZE FAILED\n" + details
@@ -144,7 +145,7 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
         renderHandler.removeCallbacks(frameTask)
         val latch = CountDownLatch(1)
         renderHandler.post {
-            try { NativeBridge.destroyDisplaySurface() } finally { latch.countDown() }
+            try { displayBackend.detach() } finally { latch.countDown() }
         }
         try { latch.await(1500L, TimeUnit.MILLISECONDS) } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
