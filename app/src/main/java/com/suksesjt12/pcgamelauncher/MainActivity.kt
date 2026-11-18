@@ -54,7 +54,7 @@ class MainActivity : Activity() {
         performanceHandler.removeCallbacks(performanceRefresh)
         performanceRefresh.run()
         if (RuntimeExecutionManager.isGameRunning()) {
-            if (android.provider.Settings.canDrawOverlays(this)) ControllerOverlayManager.show(this)
+            if (android.provider.Settings.canDrawOverlays(this)) ControllerOverlayManager.show(this, RuntimeExecutionManager.controllerSettings())
         } else {
             ControllerOverlayManager.hide()
         }
@@ -161,7 +161,7 @@ class MainActivity : Activity() {
         renderLibrary(list)
 
         val footer = TextView(this).apply {
-            text = "PCGameLauncherARM64 • v0.7.0\nWine keyboard/mouse input bridge, floating touch controls and per-game profiles."
+            text = "PCGameLauncherARM64 • v0.8.0\nAnalog-style movement, mouse-look and per-game input presets."
             textSize = 11f
             setTextColor(Color.rgb(120, 132, 153))
             gravity = Gravity.CENTER
@@ -398,6 +398,10 @@ class MainActivity : Activity() {
         val latencyLabels = latencyValues.map { "$it ms" }
         val layoutValues = listOf("classic", "compact")
         val layoutLabels = listOf("Classic", "Compact")
+        val movementValues = listOf("wasd", "arrows")
+        val movementLabels = listOf("WASD", "Arrow keys")
+        val actionValues = listOf("jiku", "numpad")
+        val actionLabels = listOf("J / K / U / I", "Numpad 1 / 2 / 4 / 5")
 
         fun addSpinner(label: String, options: List<String>, selected: Int): Spinner {
             val title = TextView(this).apply {
@@ -497,7 +501,35 @@ class MainActivity : Activity() {
             layoutLabels,
             layoutValues.indexOf(current.controllerLayout)
         )
-
+        val movementSpinner = addSpinner(
+            "Movement keys",
+            movementLabels,
+            movementValues.indexOf(current.movementPreset)
+        )
+        val actionSpinner = addSpinner(
+            "Action buttons",
+            actionLabels,
+            actionValues.indexOf(current.actionPreset)
+        )
+        val sensitivityLabel = TextView(this).apply {
+            text = "Mouse-look sensitivity: ${current.mouseSensitivity}%"
+            textSize = 12f
+            setTextColor(Color.rgb(205, 215, 230))
+            setPadding(0, dp(10), 0, dp(2))
+        }
+        form.addView(sensitivityLabel)
+        val sensitivitySeek = SeekBar(this).apply {
+            max = 200
+            progress = current.mouseSensitivity - 50
+        }
+        sensitivitySeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                val value = 50 + (progress / 25) * 25
+                sensitivityLabel.text = "Mouse-look sensitivity: ${value}%"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+        })
         val scaleLabel = TextView(this).apply {
             text = "Controller scale: ${current.controllerScale}%"
             textSize = 12f
@@ -620,13 +652,16 @@ class MainActivity : Activity() {
                         pulseLatencyMs = latencyValues[latencySpinner.selectedItemPosition],
                         controllerLayout = layoutValues[layoutSpinner.selectedItemPosition],
                         controllerOpacity = opacitySeek.progress + 30,
-                        controllerScale = scaleSeek.progress + 75
+                        controllerScale = scaleSeek.progress + 75,
+                        movementPreset = movementValues[movementSpinner.selectedItemPosition],
+                        actionPreset = actionValues[actionSpinner.selectedItemPosition],
+                        mouseSensitivity = 50 + (sensitivitySeek.progress / 25) * 25
                     )
                     GameProfileSettings.save(profile, settings)
                     dialog.dismiss()
                     showMessage(
                         "Settings saved",
-                        "Game profile: ${game.name}\nResolution preference: ${settings.resolution}\nDXVK FPS cap: ${if (settings.frameLimit == 0) "Uncapped" else settings.frameLimit}\nVSync: ${if (settings.vsync) "On" else "Off"}\nAudio: ${settings.audioMode}\nController layout: ${settings.controllerLayout}\n\nDXVK options apply only when DXVK is installed. Floating controls send mapped keyboard keys to the focused Wine desktop when the input helper is connected."
+                        "Game profile: ${game.name}\nResolution preference: ${settings.resolution}\nDXVK FPS cap: ${if (settings.frameLimit == 0) "Uncapped" else settings.frameLimit}\nVSync: ${if (settings.vsync) "On" else "Off"}\nAudio: ${settings.audioMode}\nController: ${settings.movementPreset} + ${settings.actionPreset}\nMouse sensitivity: ${settings.mouseSensitivity}%\n\nThe left analog-style stick maps to keyboard directions. The right look pad sends mouse movement. These are not SDL/XInput axes."
                     )
                 } catch (error: Exception) {
                     showMessage("Settings gagal disimpan", error.message ?: "Kesalahan konfigurasi.")
@@ -646,7 +681,7 @@ class MainActivity : Activity() {
             return
         }
         if (ControllerOverlayManager.isShowing()) ControllerOverlayManager.hide()
-        else if (!ControllerOverlayManager.show(this)) {
+        else if (!ControllerOverlayManager.show(this, RuntimeExecutionManager.controllerSettings())) {
             showMessage("Overlay gagal ditampilkan", "Android tidak dapat membuat jendela kontrol mengambang.")
         }
     }
@@ -832,7 +867,7 @@ class MainActivity : Activity() {
                     launch.message
 
                 if (android.provider.Settings.canDrawOverlays(this)) {
-                    ControllerOverlayManager.show(this)
+                    ControllerOverlayManager.show(this, RuntimeExecutionManager.controllerSettings())
                 } else {
                     AlertDialog.Builder(this)
                         .setTitle("Aktifkan kontrol mengambang")

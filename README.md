@@ -21,8 +21,11 @@ Android ARM64 launcher project for organizing and testing legally owned Windows 
 - Configure per-game DXVK VSync, frame-rate limit, and HUD using an isolated config file.
 - Pass optional PulseAudio latency hints to Wine game processes.
 - Monitor Android battery temperature, battery percentage, system thermal status, available RAM, and launcher-process PSS.
-- Save per-game controller layout, scale, and opacity preferences.
-- Show an Android floating touch controller above other apps after the user grants overlay permission.
+- Save per-game controller layout, scale, opacity, movement preset, action-key preset, and mouse-look sensitivity.
+- Show an Android floating controller with a left analog-style movement stick, face buttons, and right mouse-look pad after overlay permission is granted.
+- Map movement to WASD or arrow keys and face buttons to J/K/U/I or numpad presets on a per-game basis.
+- Translate right-pad drag into relative Windows mouse movement through the Wine helper.
+- Declare Android INTERNET permission for the authenticated loopback input connection.
 - Build a small x86_64 Windows helper that connects to an authenticated loopback TCP endpoint and translates virtual-button messages into Win32 SendInput keyboard/mouse events inside Wine.
 - Package and verify both the ARM64 Box64 host engine and x86_64 Wine input helper in the debug APK through GitHub Actions.
 
@@ -48,9 +51,11 @@ The PulseAudio setting is a client latency hint, not an audio-server installer o
 switch. The floating controller now sends mapped keyboard and mouse events through a small
 Wine helper using Win32 SendInput. It requires Android's "display over other apps" permission
 and a Wine desktop/window that is receiving keyboard or mouse input. The default mapping is
-W/A/S/D for movement, J/K/U/I for face buttons, Enter for Start, and Escape for Back. This is
-not an SDL virtual joystick or XInput controller, has no analog sticks, and will not control
-games that require gamepad-only input. The launcher still lacks a Wine/SDL display surface,
+W/A/S/D for movement, J/K/U/I for face buttons, Enter for Start, and Escape for Back. Stage 9
+adds an analog-style touch stick (quantized to eight-way keyboard directions) and a right
+mouse-look surface that sends relative mouse movement. Movement keys, action keys, and mouse
+sensitivity are stored per game. It does not expose true analog axes, SDL virtual joystick, or
+XInput and will not control games that require gamepad-only input. The launcher still lacks a Wine/SDL display surface,
 so a compatible display backend must be supplied by the imported runtime for the game itself
 to be visible. Resolution remains a preferred profile setting until a Wine display/window
 surface exists. DXVK HUD can show in-game FPS only when the game actually renders through a

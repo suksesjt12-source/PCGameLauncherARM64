@@ -32,6 +32,7 @@ object RuntimeExecutionManager {
     @Volatile private var activeGameProcess: Process? = null
     @Volatile private var activeGameLog: File? = null
     @Volatile private var activeInputHelperProcess: Process? = null
+    @Volatile private var activeControllerSettings: GameProfileSettings.Settings? = null
     @Volatile private var lastGameExitCode: Int? = null
 
     fun isGameRunning(): Boolean = activeGameProcess?.isAlive == true
@@ -39,6 +40,9 @@ object RuntimeExecutionManager {
     fun lastGameLog(): File? = activeGameLog
 
     fun lastGameExitCode(): Int? = lastGameExitCode
+
+    fun controllerSettings(): GameProfileSettings.Settings =
+        activeControllerSettings ?: GameProfileSettings.Settings()
 
     fun launchWindowsGame(
         context: Context,
@@ -187,6 +191,7 @@ object RuntimeExecutionManager {
                 activeGameProcess = process
                 activeGameLog = logFile
                 activeInputHelperProcess = inputHelperProcess
+                activeControllerSettings = gameSettings
                 lastGameExitCode = null
             }
 
@@ -201,6 +206,7 @@ object RuntimeExecutionManager {
                             if (helper.isAlive) helper.destroyForcibly()
                         }
                         activeInputHelperProcess = null
+                        activeControllerSettings = null
                     }
                     WineInputBridge.stop()
                     ControllerOverlayManager.hide()
@@ -294,6 +300,7 @@ object RuntimeExecutionManager {
                 WineInputBridge.stop()
                 activeInputHelperProcess?.let { if (it.isAlive) it.destroyForcibly() }
                 activeInputHelperProcess = null
+                activeControllerSettings = null
                 ControllerOverlayManager.hide()
             }
             Result(stopped, "Stop game", null, if (stopped) "Permintaan penghentian dikirim." else "Proses belum berhenti.")

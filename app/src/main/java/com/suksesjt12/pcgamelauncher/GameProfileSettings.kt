@@ -3,10 +3,7 @@ package com.suksesjt12.pcgamelauncher
 import org.json.JSONObject
 import java.io.File
 
-/**
- * Persistent per-game settings. Only DXVK/audio hints are passed to Wine today;
- * the resolution value remains a preference until a Wine display surface exists.
- */
+/** Per-game input settings. Movement is mapped to keyboard states, not SDL/XInput axes. */
 object GameProfileSettings {
     data class Settings(
         val resolution: String = "960x540",
@@ -17,7 +14,10 @@ object GameProfileSettings {
         val pulseLatencyMs: Int = 60,
         val controllerLayout: String = "classic",
         val controllerOpacity: Int = 65,
-        val controllerScale: Int = 100
+        val controllerScale: Int = 100,
+        val movementPreset: String = "wasd",
+        val actionPreset: String = "jiku",
+        val mouseSensitivity: Int = 100
     )
 
     private val supportedResolutions = setOf("640x480", "800x600", "960x540", "1280x720")
@@ -26,6 +26,8 @@ object GameProfileSettings {
     private val supportedAudioModes = setOf("default", "pulseaudio")
     private val supportedLayouts = setOf("classic", "compact")
     private val supportedPulseLatency = setOf(40, 60, 100, 150)
+    private val supportedMovementPresets = setOf("wasd", "arrows")
+    private val supportedActionPresets = setOf("jiku", "numpad")
 
     fun load(profile: GameContainerManager.Profile): Settings {
         return try {
@@ -33,7 +35,7 @@ object GameProfileSettings {
             val graphics = root.optJSONObject("graphicsSettings") ?: JSONObject()
             val audio = root.optJSONObject("audioSettings") ?: JSONObject()
             val controls = root.optJSONObject("controllerSettings") ?: JSONObject()
-            val settings = Settings(
+            val value = Settings(
                 resolution = graphics.optString("resolution", "960x540"),
                 frameLimit = graphics.optInt("frameLimit", 0),
                 vsync = graphics.optBoolean("vsync", true),
@@ -42,83 +44,81 @@ object GameProfileSettings {
                 pulseLatencyMs = audio.optInt("pulseLatencyMs", 60),
                 controllerLayout = controls.optString("layout", "classic"),
                 controllerOpacity = controls.optInt("opacity", 65),
-                controllerScale = controls.optInt("scale", 100)
+                controllerScale = controls.optInt("scale", 100),
+                movementPreset = controls.optString("movementPreset", "wasd"),
+                actionPreset = controls.optString("actionPreset", "jiku"),
+                mouseSensitivity = controls.optInt("mouseSensitivity", 100)
             )
-            validate(settings)
-            settings
-        } catch (_: Exception) {
-            Settings()
-        }
+            validate(value)
+            value
+        } catch (_: Exception) { Settings() }
     }
 
     fun save(profile: GameContainerManager.Profile, settings: Settings) {
         validate(settings)
         val root = JSONObject(profile.profileFile.readText(Charsets.UTF_8))
-        root.put(
-            "graphicsSettings",
-            JSONObject()
-                .put("resolution", settings.resolution)
-                .put("frameLimit", settings.frameLimit)
-                .put("vsync", settings.vsync)
-                .put("dxvkHud", settings.dxvkHud)
-        )
-        root.put(
-            "audioSettings",
-            JSONObject()
-                .put("mode", settings.audioMode)
-                .put("pulseLatencyMs", settings.pulseLatencyMs)
-        )
-        root.put(
-            "controllerSettings",
-            JSONObject()
-                .put("layout", settings.controllerLayout)
-                .put("opacity", settings.controllerOpacity)
-                .put("scale", settings.controllerScale)
-        )
+        root.put("graphicsSettings", JSONObject()
+            .put("resolution", settings.resolution)
+            .put("frameLimit", settings.frameLimit)
+            .put("vsync", settings.vsync)
+            .put("dxvkHud", settings.dxvkHud))
+        root.put("audioSettings", JSONObject()
+            .put("mode", settings.audioMode)
+            .put("pulseLatencyMs", settings.pulseLatencyMs))
+        root.put("controllerSettings", JSONObject()
+            .put("layout", settings.controllerLayout)
+            .put("opacity", settings.controllerOpacity)
+            .put("scale", settings.controllerScale)
+            .put("movementPreset", settings.movementPreset)
+            .put("actionPreset", settings.actionPreset)
+            .put("mouseSensitivity", settings.mouseSensitivity))
         root.put("settingsUpdatedAt", System.currentTimeMillis())
         profile.profileFile.writeText(root.toString(2), Charsets.UTF_8)
     }
 
-    fun writeDxvkConfig(
-        profile: GameContainerManager.Profile,
-        settings: Settings
-    ): File {
+    /** Order: up, down, left, right. */
+    fun movementKeys(settings: Settings): IntArray =
+        if (settings.movementPreset == "arrows") intArrayOf(0x26, 0x28, 0x25, 0x27)
+        else intArrayOf(0x57, 0x53, 0x41, 0x44)
+
+    /** Order: A, B, X, Y. */
+    fun actionKeys(settings: Settings): IntArray =
+        if (settings.actionPreset == "numpad") intArrayOf(0x61, 0x62, 0x64, 0x65)
+        else intArrayOf(0x4A, 0x4B, 0x55, 0x49)
+
+    fun writeDxvkConfig(profile: GameContainerManager.Profile, settings: Settings): File {
         validate(settings)
         val prefixRoot = profile.directory.canonicalFile
         val configDirectory = File(prefixRoot, "pcgl-config").canonicalFile
         require(configDirectory.path.startsWith(prefixRoot.path + File.separator)) {
             "Direktori konfigurasi keluar dari Wine prefix."
         }
-        if (!configDirectory.exists() && !configDirectory.mkdirs()) {
-            error("Tidak dapat membuat direktori konfigurasi DXVK.")
-        }
-
+        if (!configDirectory.exists() && !configDirectory.mkdirs()) error("Tidak dapat membuat direktori konfigurasi DXVK.")
         val configFile = File(configDirectory, "dxvk.conf")
         val lines = mutableListOf(
             "# Generated by PCGameLauncherARM64",
             "# DXVK settings apply only when the selected DXVK runtime is active.",
             "dxgi.syncInterval = ${if (settings.vsync) 1 else 0}"
         )
-        if (settings.frameLimit > 0) {
-            lines.add("dxvk.maxFrameRate = ${settings.frameLimit}")
-        } else {
-            lines.add("# dxvk.maxFrameRate is left at the DXVK default (uncapped by this profile).")
-        }
+        if (settings.frameLimit > 0) lines.add("dxvk.maxFrameRate = ${settings.frameLimit}")
+        else lines.add("# dxvk.maxFrameRate is left at the DXVK default (uncapped by this profile).")
         configFile.writeText(lines.joinToString("\n") + "\n", Charsets.UTF_8)
         return configFile
     }
 
-    fun dxvkHudValue(settings: Settings): String? =
-        settings.dxvkHud.takeIf { it != "off" }
+    fun dxvkHudValue(settings: Settings): String? = settings.dxvkHud.takeIf { it != "off" }
 
     private fun validate(settings: Settings) {
-        require(settings.resolution in supportedResolutions) { "Resolusi profil tidak didukung." }
-        require(settings.frameLimit in supportedFrameLimits) { "Batas FPS tidak valid." }
-        require(settings.dxvkHud in supportedHudModes) { "Mode DXVK HUD tidak valid." }
-        require(settings.audioMode in supportedAudioModes) { "Mode audio tidak valid." }
-        require(settings.pulseLatencyMs in supportedPulseLatency) { "Nilai PulseAudio latency tidak valid." }
-        require(settings.controllerLayout in supportedLayouts) { "Layout kontroler tidak valid." }
-        require(settings.controllerOpacity in 30..100) { "Opacity kontroler harus 30–100%." }
-        require(settings.controllerScale in 75..125) { "Skala kontroler harus 75–125%." }
+        require(settings.resolution in supportedResolutions)
+        require(settings.frameLimit in supportedFrameLimits)
+        require(settings.dxvkHud in supportedHudModes)
+        require(settings.audioMode in supportedAudioModes)
+        require(settings.pulseLatencyMs in supportedPulseLatency)
+        require(settings.controllerLayout in supportedLayouts)
+        require(settings.controllerOpacity in 30..100)
+        require(settings.controllerScale in 75..125)
+        require(settings.movementPreset in supportedMovementPresets)
+        require(settings.actionPreset in supportedActionPresets)
+        require(settings.mouseSensitivity in 50..250)
     }
 }
