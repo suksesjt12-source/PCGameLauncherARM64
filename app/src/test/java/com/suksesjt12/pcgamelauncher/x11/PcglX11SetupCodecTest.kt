@@ -89,6 +89,7 @@ class PcglX11SetupCodecTest {
         request.putShort(0)
         request.putShort(authName.size.toShort())
         request.putShort(cookie.size.toShort())
+        request.putShort(0) // X11 setup request's final reserved field.
         request.put(authName)
         request.put(namePadding)
         request.put(cookie)
