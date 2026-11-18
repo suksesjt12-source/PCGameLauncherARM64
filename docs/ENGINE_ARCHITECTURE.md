@@ -14,7 +14,8 @@ PCGL is not a rebranded Winlator application. It may consume compatible open-sou
 - Per-game Wine prefixes and EXE staging: implemented.
 - DXVK component manager: implemented.
 - Device diagnostics and keyboard/mouse overlay: implemented with limitations documented in source.
-- Integrated display server + window lifecycle: not yet implemented.
+- Native Android Surface/EGL lifecycle and OpenGL ES diagnostic rendering: implemented as a proof of concept.
+- Wine/XServer/SDL game-window bridge: not yet implemented.
 - SDL input/gamepad bridge: not yet implemented; current overlay maps to keyboard/mouse.
 - End-to-end visible game rendering: not yet verified.
 
@@ -32,11 +33,12 @@ PCGL is not a rebranded Winlator application. It may consume compatible open-sou
 
 - **Milestone A — independent application boundary:** remove the companion Winlator APK handoff and its branding workflow; keep all user-facing launcher operations in PCGL.
 - **Milestone B — runtime contract:** define stable interfaces for runtime packages, game profiles, process sessions, display sessions, and input providers.
-- **Milestone C — display proof of concept:** create and destroy one native display surface, connect Wine's supported display path, and verify a simple Windows test application is visibly rendered.
+- **Milestone C1 — Android EGL proof of concept:** create/destroy a native Android Surface/EGL session and submit OpenGL ES diagnostic frames.
+- **Milestone C2 — Wine display bridge:** integrate a compatible, licensed display server/window path and verify a Windows test app is visibly rendered.
 - **Milestone D — input proof of concept:** route touch events to the active window, then add a tested virtual gamepad backend.
 - **Milestone E — Mali device profiles:** benchmark a small set of workloads on real Mali-G57 devices before shipping automatic defaults.
 - **Milestone F — AI diagnostics:** summarize logs and explain settings; all changes remain reviewable and reversible.
 
 ## Acceptance criteria
 
-A build is not considered a playable Windows-game launcher until a test executable opens a visible window, receives input, renders frames, exits cleanly, and produces useful logs on a real ARM64 Android device. CI compilation and APK packaging alone do not satisfy this criterion.
+The EGL test validates only PCGL's own Android surface and GPU submission path. A build is not considered playable until a Windows test executable opens a visible window through the Wine display bridge, receives input, renders frames, exits cleanly, and produces useful logs on a real ARM64 Android device. CI compilation and APK packaging alone do not satisfy this criterion.
