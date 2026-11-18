@@ -4,6 +4,7 @@
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
 #include <mutex>
+#include <cmath>
 #include <vulkan/vulkan.h>
 #include <sstream>
 #include <string>
@@ -107,11 +108,91 @@ struct PcglEglSession {
     EGLContext context = EGL_NO_CONTEXT;
     EGLint width = 0;
     EGLint height = 0;
+    GLuint program = 0;
+    GLint positionAttribute = -1;
+    GLint colorAttribute = -1;
     bool ready = false;
     std::string info = "PCGL EGL session idle.";
 };
 std::mutex g_pcglEglMutex;
 PcglEglSession g_pcglEgl;
+
+GLuint pcglCompileShader(GLenum type, const char* source, std::string& error) {
+    const GLuint shader = glCreateShader(type);
+    if (shader == 0) {
+        error = "glCreateShader failed.";
+        return 0;
+    }
+    glShaderSource(shader, 1, &source, nullptr);
+    glCompileShader(shader);
+    GLint compiled = GL_FALSE;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+    if (compiled != GL_TRUE) {
+        GLint length = 0;
+        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &length);
+        std::string info(static_cast<size_t>(length > 1 ? length : 1), '\0');
+        glGetShaderInfoLog(shader, length, nullptr, info.data());
+        error = "Shader compile failed: " + info;
+        glDeleteShader(shader);
+        return 0;
+    }
+    return shader;
+}
+
+bool pcglCreateDiagnosticProgram(std::string& error) {
+    static const char* vertexSource =
+        "attribute vec2 aPosition;\\n"
+        "attribute vec3 aColor;\\n"
+        "varying vec3 vColor;\\n"
+        "void main(){ gl_Position=vec4(aPosition,0.0,1.0); vColor=aColor; }\\n";
+    static const char* fragmentSource =
+        "precision mediump float;\\n"
+        "varying vec3 vColor;\\n"
+        "void main(){ gl_FragColor=vec4(vColor,1.0); }\\n";
+
+    const GLuint vertex = pcglCompileShader(GL_VERTEX_SHADER, vertexSource, error);
+    if (vertex == 0) return false;
+    const GLuint fragment = pcglCompileShader(GL_FRAGMENT_SHADER, fragmentSource, error);
+    if (fragment == 0) {
+        glDeleteShader(vertex);
+        return false;
+    }
+
+    const GLuint program = glCreateProgram();
+    if (program == 0) {
+        error = "glCreateProgram failed.";
+        glDeleteShader(vertex);
+        glDeleteShader(fragment);
+        return false;
+    }
+    glAttachShader(program, vertex);
+    glAttachShader(program, fragment);
+    glLinkProgram(program);
+    glDeleteShader(vertex);
+    glDeleteShader(fragment);
+
+    GLint linked = GL_FALSE;
+    glGetProgramiv(program, GL_LINK_STATUS, &linked);
+    if (linked != GL_TRUE) {
+        GLint length = 0;
+        glGetProgramiv(program, GL_INFO_LOG_LENGTH, &length);
+        std::string info(static_cast<size_t>(length > 1 ? length : 1), '\0');
+        glGetProgramInfoLog(program, length, nullptr, info.data());
+        error = "Shader link failed: " + info;
+        glDeleteProgram(program);
+        return false;
+    }
+
+    g_pcglEgl.positionAttribute = glGetAttribLocation(program, "aPosition");
+    g_pcglEgl.colorAttribute = glGetAttribLocation(program, "aColor");
+    if (g_pcglEgl.positionAttribute < 0 || g_pcglEgl.colorAttribute < 0) {
+        error = "Diagnostic shader attributes are unavailable.";
+        glDeleteProgram(program);
+        return false;
+    }
+    g_pcglEgl.program = program;
+    return true;
+}
 
 std::string pcglEglError(const char* operation) {
     std::ostringstream out;
@@ -120,6 +201,10 @@ std::string pcglEglError(const char* operation) {
 }
 void pcglDestroyEglLocked() {
     if (g_pcglEgl.display != EGL_NO_DISPLAY) {
+        if (g_pcglEgl.context != EGL_NO_CONTEXT && g_pcglEgl.surface != EGL_NO_SURFACE) {
+            eglMakeCurrent(g_pcglEgl.display, g_pcglEgl.surface, g_pcglEgl.surface, g_pcglEgl.context);
+            if (g_pcglEgl.program != 0) glDeleteProgram(g_pcglEgl.program);
+        }
         eglMakeCurrent(g_pcglEgl.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         if (g_pcglEgl.surface != EGL_NO_SURFACE) eglDestroySurface(g_pcglEgl.display, g_pcglEgl.surface);
         if (g_pcglEgl.context != EGL_NO_CONTEXT) eglDestroyContext(g_pcglEgl.display, g_pcglEgl.context);
@@ -192,6 +277,12 @@ Java_com_suksesjt12_pcgamelauncher_NativeBridge_createDisplaySurface(
         pcglDestroyEglLocked(); g_pcglEgl.info = "ERROR: " + error;
         return pcglNewString(env, g_pcglEgl.info);
     }
+    std::string shaderError;
+    if (!pcglCreateDiagnosticProgram(shaderError)) {
+        pcglDestroyEglLocked();
+        g_pcglEgl.info = "ERROR: " + shaderError;
+        return pcglNewString(env, g_pcglEgl.info);
+    }
     eglQuerySurface(g_pcglEgl.display, g_pcglEgl.surface, EGL_WIDTH, &g_pcglEgl.width);
     eglQuerySurface(g_pcglEgl.display, g_pcglEgl.surface, EGL_HEIGHT, &g_pcglEgl.height);
     if (g_pcglEgl.width < 1) g_pcglEgl.width = requestedWidth;
@@ -232,6 +323,38 @@ Java_com_suksesjt12_pcgamelauncher_NativeBridge_renderDisplayFrame(JNIEnv*, jobj
     glViewport(0, 0, g_pcglEgl.width, g_pcglEgl.height);
     glClearColor(0.025f + phase * 0.055f, 0.045f, 0.085f + (1.0f - phase) * 0.07f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
+
+    const float angle = phase * 6.28318530718f;
+    const float c = std::cos(angle);
+    const float s = std::sin(angle);
+    const float source[] = {
+         0.00f,  0.60f, 0.20f, 0.80f, 1.00f,
+        -0.56f, -0.42f, 1.00f, 0.45f, 0.18f,
+         0.56f, -0.42f, 0.30f, 1.00f, 0.52f
+    };
+    float vertices[15];
+    for (int i = 0; i < 3; ++i) {
+        const float x = source[i * 5];
+        const float y = source[i * 5 + 1];
+        vertices[i * 5] = x * c - y * s;
+        vertices[i * 5 + 1] = x * s + y * c;
+        vertices[i * 5 + 2] = source[i * 5 + 2];
+        vertices[i * 5 + 3] = source[i * 5 + 3];
+        vertices[i * 5 + 4] = source[i * 5 + 4];
+    }
+
+    glUseProgram(g_pcglEgl.program);
+    glEnableVertexAttribArray(static_cast<GLuint>(g_pcglEgl.positionAttribute));
+    glEnableVertexAttribArray(static_cast<GLuint>(g_pcglEgl.colorAttribute));
+    glVertexAttribPointer(static_cast<GLuint>(g_pcglEgl.positionAttribute), 2, GL_FLOAT,
+                          GL_FALSE, 5 * sizeof(float), vertices);
+    glVertexAttribPointer(static_cast<GLuint>(g_pcglEgl.colorAttribute), 3, GL_FLOAT,
+                          GL_FALSE, 5 * sizeof(float), vertices + 2);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glDisableVertexAttribArray(static_cast<GLuint>(g_pcglEgl.positionAttribute));
+    glDisableVertexAttribArray(static_cast<GLuint>(g_pcglEgl.colorAttribute));
+    glUseProgram(0);
+
     const GLenum error = glGetError();
     if (error != GL_NO_ERROR) {
         std::ostringstream info; info << "OpenGL ES error 0x" << std::hex << error;
