@@ -1,10 +1,14 @@
 cmake_minimum_required(VERSION 3.22.1)
-project(launcher_native LANGUAGES CXX)
+project(launcher_native LANGUAGES C CXX)
 
-add_library(launcher_native SHARED nativebridge.cpp)
+add_library(
+    launcher_native
+    SHARED
+    nativebridge.cpp
+    x11connector_epoll.c
+)
 
-# These are Android NDK platform libraries. Link by their platform names so
-# NDK's toolchain resolves their system stubs for the ARM64 target.
+# PCGL owns the native X11 transport inside this APK.
 target_link_libraries(
     launcher_native
     log
