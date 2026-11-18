@@ -57,6 +57,32 @@ class PcglX11FramebufferTest {
     }
 
     @Test
+    fun getImageReturnsClientOrderedZPixmapBytes() {
+        val framebuffer = PcglX11Framebuffer(8, 6) {}
+        val window = 0x00200030
+        val gc = 0x00200031
+        assertTrue(framebuffer.createWindow(window, PcglX11SetupCodec.ROOT_WINDOW_ID, 0, 0, 3, 2, 24))
+        assertTrue(framebuffer.createGraphicsContext(gc, foreground = 0x00112233))
+        assertTrue(framebuffer.mapWindow(window))
+        assertTrue(framebuffer.fillRectangles(window, gc, listOf(intArrayOf(0, 0, 1, 1))))
+
+        val littleEndian = framebuffer.getImage(
+            window, 0, 0, 1, 1, java.nio.ByteOrder.LITTLE_ENDIAN
+        )!!
+        assertEquals(0x33, littleEndian[0].toInt() and 0xff)
+        assertEquals(0x22, littleEndian[1].toInt() and 0xff)
+        assertEquals(0x11, littleEndian[2].toInt() and 0xff)
+
+        val bigEndian = framebuffer.getImage(
+            window, 0, 0, 1, 1, java.nio.ByteOrder.BIG_ENDIAN
+        )!!
+        assertEquals(0, bigEndian[0].toInt() and 0xff)
+        assertEquals(0x11, bigEndian[1].toInt() and 0xff)
+        assertEquals(0x22, bigEndian[2].toInt() and 0xff)
+        assertEquals(0x33, bigEndian[3].toInt() and 0xff)
+    }
+
+    @Test
     fun fillRectangleUsesGraphicsContextForegroundColor() {
         var rendered: PcglWindowFrame? = null
         val framebuffer = PcglX11Framebuffer(8, 6) { rendered = it }
