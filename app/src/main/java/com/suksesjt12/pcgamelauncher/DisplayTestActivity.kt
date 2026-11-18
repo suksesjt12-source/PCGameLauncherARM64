@@ -24,7 +24,8 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var statusView: TextView
     private lateinit var frameView: TextView
     private lateinit var x11TestButton: Button
-    private lateinit var uploadTestButton: Button
+    private lateinit var tcpX11TestButton: Button
+    private lateinit var uploadTestButton
     private lateinit var clearFrameButton: Button
     private val displayBackend: PcglDisplayBackend = PcglEglSurfaceBackend()
 
@@ -100,6 +101,12 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
         }
         footer.addView(x11TestButton)
 
+        tcpX11TestButton = Button(this).apply {
+            text = "TEST AUTHENTICATED X11 TCP :0"
+            setOnClickListener { runX11TcpProtocolSelfTest() }
+        }
+        footer.addView(tcpX11TestButton)
+
         uploadTestButton = Button(this).apply {
             text = "TEST RGBA WINDOW FRAME UPLOAD"
             setOnClickListener { runWindowFrameUploadTest() }
@@ -163,6 +170,42 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
             }
         }.apply {
             name = "PCGL-X11-SelfTest"
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun runX11TcpProtocolSelfTest() {
+        if (x11TestRunning) return
+        x11TestRunning = true
+        tcpX11TestButton.isEnabled = false
+        statusView.text = "PCGL X11 TCP\\nStarting authenticated loopback display test..."
+        Thread {
+            val result = PcglX11TcpProtocolSelfTest.run(File(filesDir, "pcgl/x11-tcp-protocol-test")) { frame ->
+                // The protocol thread never touches EGL; the renderer thread owns the context.
+                renderHandler.post {
+                    if (displayReady && !isDestroyed) {
+                        val uploaded = displayBackend.submitWindowFrame(frame)
+                        if (!uploaded) {
+                            runOnUiThread {
+                                if (!isDestroyed) statusView.text =
+                                    "X11 TCP FRAME UPLOAD FAILED\\n" + displayBackend.details()
+                            }
+                        }
+                    }
+                }
+            }
+            runOnUiThread {
+                x11TestRunning = false
+                if (!isDestroyed) {
+                    tcpX11TestButton.isEnabled = true
+                    statusView.text = "PCGL X11 TCP\\n" + result.details +
+                        if (displayReady) "\\nFrame callback was routed to the Android EGL renderer." else
+                            "\\nEGL Surface is not active; protocol output was not displayed."
+                }
+            }
+        }.apply {
+            name = "PCGL-X11-TCP-SelfTest"
             isDaemon = true
             start()
         }
