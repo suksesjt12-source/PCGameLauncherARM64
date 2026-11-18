@@ -141,14 +141,14 @@ GLuint pcglCompileShader(GLenum type, const char* source, std::string& error) {
 
 bool pcglCreateDiagnosticProgram(std::string& error) {
     static const char* vertexSource =
-        "attribute vec2 aPosition;\\n"
-        "attribute vec3 aColor;\\n"
-        "varying vec3 vColor;\\n"
-        "void main(){ gl_Position=vec4(aPosition,0.0,1.0); vColor=aColor; }\\n";
+        "attribute vec2 aPosition;\n"
+        "attribute vec3 aColor;\n"
+        "varying vec3 vColor;\n"
+        "void main(){ gl_Position=vec4(aPosition,0.0,1.0); vColor=aColor; }\n";
     static const char* fragmentSource =
-        "precision mediump float;\\n"
-        "varying vec3 vColor;\\n"
-        "void main(){ gl_FragColor=vec4(vColor,1.0); }\\n";
+        "precision mediump float;\n"
+        "varying vec3 vColor;\n"
+        "void main(){ gl_FragColor=vec4(vColor,1.0); }\n";
 
     const GLuint vertex = pcglCompileShader(GL_VERTEX_SHADER, vertexSource, error);
     if (vertex == 0) return false;
