@@ -125,8 +125,9 @@ object WineRuntimeEnvironment {
             } else {
                 environment.remove("XAUTHORITY")
             }
-            environment["WINE_X11FORCEGLX"] = "1"
-            environment["BOX64_X11GLX"] = "1"
+            // Do not force GLX: the current PCGL server is core X11/software only.
+            environment.remove("WINE_X11FORCEGLX")
+            environment.remove("BOX64_X11GLX")
         } else {
             environment.remove("DISPLAY")
             environment.remove("XAUTHORITY")
