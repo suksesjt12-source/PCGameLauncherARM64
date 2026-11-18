@@ -12,23 +12,24 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.suksesjt12.pcgamelauncher.x11.PcglX11ProtocolSelfTest
+import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-/**
- * PCGL-owned Android Surface/EGL proof of concept.
- * It renders diagnostic frames only; it is not connected to Wine yet.
- */
+/** PCGL-owned Android Surface/EGL diagnostic screen with a local X11 protocol test. */
 class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var renderThread: HandlerThread
     private lateinit var renderHandler: Handler
     private lateinit var statusView: TextView
     private lateinit var frameView: TextView
+    private lateinit var x11TestButton: Button
     private val displayBackend: PcglDisplayBackend = PcglEglSurfaceBackend()
 
     @Volatile private var displayReady = false
     @Volatile private var activityResumed = false
     @Volatile private var surfaceAvailable = false
+    @Volatile private var x11TestRunning = false
     private var frameIndex = 0L
 
     private val frameTask = object : Runnable {
@@ -37,7 +38,8 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
             val ok = try { displayBackend.renderFrame(frameIndex) } catch (_: Throwable) { false }
             if (!ok) {
                 displayReady = false
-                val details = runCatching { displayBackend.details() }.getOrDefault("Native display bridge unavailable.")
+                val details = runCatching { displayBackend.details() }
+                    .getOrDefault("Native display bridge unavailable.")
                 runOnUiThread {
                     statusView.text = "RENDER STOPPED\n" + details
                     frameView.text = "Frame submission stopped."
@@ -47,7 +49,9 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
             frameIndex += 1L
             if (frameIndex % 30L == 0L) {
                 runOnUiThread {
-                    if (!isDestroyed) frameView.text = "Frames submitted: " + frameIndex + "\n" + NativeBridge.displayInfo()
+                    if (!isDestroyed) {
+                        frameView.text = "Frames submitted: " + frameIndex + "\n" + NativeBridge.displayInfo()
+                    }
                 }
             }
             renderHandler.postDelayed(this, 33L)
@@ -87,6 +91,11 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
             setTextColor(Color.rgb(205, 218, 237))
         }
         footer.addView(frameView)
+        x11TestButton = Button(this).apply {
+            text = "RUN X11 PROTOCOL SELF-TEST"
+            setOnClickListener { runX11ProtocolSelfTest() }
+        }
+        footer.addView(x11TestButton)
         footer.addView(Button(this).apply {
             text = "CLOSE DISPLAY TEST"
             setOnClickListener { finish() }
@@ -95,6 +104,27 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
             setMargins(dp(12), 0, dp(12), dp(12))
         })
         setContentView(root)
+    }
+
+    private fun runX11ProtocolSelfTest() {
+        if (x11TestRunning) return
+        x11TestRunning = true
+        x11TestButton.isEnabled = false
+        statusView.text = "PCGL X11 PROTOCOL\nStarting local AF_UNIX setup test..."
+        Thread {
+            val result = PcglX11ProtocolSelfTest.run(File(filesDir, "pcgl/x11-protocol-test"))
+            runOnUiThread {
+                x11TestRunning = false
+                if (!isDestroyed) {
+                    x11TestButton.isEnabled = true
+                    statusView.text = "PCGL X11 PROTOCOL\n" + result.details
+                }
+            }
+        }.apply {
+            name = "PCGL-X11-SelfTest"
+            isDaemon = true
+            start()
+        }
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
@@ -147,7 +177,9 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
         renderHandler.post {
             try { displayBackend.detach() } finally { latch.countDown() }
         }
-        try { latch.await(1500L, TimeUnit.MILLISECONDS) } catch (_: InterruptedException) {
+        try {
+            latch.await(1500L, TimeUnit.MILLISECONDS)
+        } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
         }
     }

@@ -8,16 +8,12 @@ import com.suksesjt12.pcgamelauncher.x11.transport.XConnectorEpoll
 import java.io.File
 import java.io.IOException
 
-/**
- * Owns only the AF_UNIX/epoll transport for a future PCGL X11 protocol server.
- * This transport does not implement X11 protocol setup or publish DISPLAY.
- */
+/** PCGL-owned AF_UNIX/epoll transport; it does not advertise DISPLAY by itself. */
 internal class PcglX11Transport(
     runtimeRoot: File,
     private val dispatcher: ProtocolDispatcher,
     relativeSocketPath: String = UnixSocketConfig.XSERVER_RELATIVE_PATH
 ) : AutoCloseable {
-
     interface ProtocolDispatcher {
         fun onClientConnected(client: Client)
         fun onClientDisconnected(client: Client)
@@ -39,18 +35,15 @@ internal class PcglX11Transport(
     @Throws(IOException::class)
     fun start(): Endpoint {
         connector?.let { return Endpoint(socketConfig.path, true) }
-
         val next = try {
             XConnectorEpoll(
                 socketConfig,
                 object : ConnectionHandler {
-                    override fun handleNewConnection(client: Client) {
+                    override fun handleNewConnection(client: Client) =
                         dispatcher.onClientConnected(client)
-                    }
 
-                    override fun handleConnectionShutdown(client: Client) {
+                    override fun handleConnectionShutdown(client: Client) =
                         dispatcher.onClientDisconnected(client)
-                    }
                 },
                 object : RequestHandler {
                     override fun handleRequest(client: Client): Boolean =
@@ -68,15 +61,21 @@ internal class PcglX11Transport(
             runCatching { next.stop() }
             throw IOException("Unable to start the PCGL X11 transport loop.", error)
         }
-
         return Endpoint(socketConfig.path, true)
     }
 
-    @Synchronized
+    /** Called on the epoll thread; deliberately does not take the lifecycle monitor. */
+    fun disconnect(client: Client) {
+        connector?.disconnectClient(client)
+    }
+
     fun stop() {
-        val active = connector ?: return
-        connector = null
-        active.stop()
+        val active = synchronized(this) {
+            val current = connector
+            connector = null
+            current
+        }
+        active?.stop()
     }
 
     override fun close() = stop()

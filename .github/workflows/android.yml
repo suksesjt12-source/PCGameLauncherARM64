@@ -103,8 +103,8 @@ jobs:
           x86_64-w64-mingw32-objdump -f app/src/main/assets/pcgl-input-bridge.exe | grep -q 'pei-x86-64'
           test -s app/src/main/assets/pcgl-input-bridge.exe
 
-      - name: Build debug APK
-        run: gradle --no-daemon assembleDebug
+      - name: Run X11 protocol codec unit tests and build debug APK
+        run: gradle --no-daemon testDebugUnitTest assembleDebug
 
       - name: Verify Box64 is packaged in APK
         shell: bash

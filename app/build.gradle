@@ -11,8 +11,8 @@ android {
         applicationId 'com.suksesjt12.pcgamelauncher'
         minSdk 26
         targetSdk 35
-        versionCode 9
-        versionName '0.9.0'
+        versionCode 10
+        versionName '0.10.0'
 
         ndk {
             abiFilters 'arm64-v8a'
@@ -62,4 +62,5 @@ android {
 dependencies {
     implementation 'com.github.luben:zstd-jni:1.5.2-3@aar'
     implementation 'org.apache.commons:commons-compress:1.20'
+    testImplementation 'junit:junit:4.13.2'
 }
