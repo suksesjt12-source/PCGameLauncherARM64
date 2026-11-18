@@ -48,7 +48,7 @@ class PcglX11SetupCodecTest {
     }
 
     @Test
-    fun authorizationIsRejectedUntilCookieSupportExists() {
+    fun authorizationIsRejectedWhenNoCookieIsConfigured() {
         val request = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN)
         request.put('l'.code.toByte())
         request.put(0)
@@ -60,6 +60,40 @@ class PcglX11SetupCodecTest {
         request.putInt(0)
         val parsed = PcglX11SetupCodec.parseRequest(request.array())
         assertTrue(parsed is PcglX11SetupCodec.ParseResult.Rejected)
+    }
+
+    @Test
+    fun matchingMitMagicCookieIsAccepted() {
+        val cookie = ByteArray(16) { (it * 7).toByte() }
+        val request = authenticatedSetupRequest(cookie)
+        assertTrue(PcglX11SetupCodec.parseRequest(request, cookie) is PcglX11SetupCodec.ParseResult.Accepted)
+    }
+
+    @Test
+    fun wrongMitMagicCookieIsRejected() {
+        val cookie = ByteArray(16) { (it * 7).toByte() }
+        val wrongCookie = cookie.copyOf().also { it[0] = (it[0].toInt() xor 0xff).toByte() }
+        val request = authenticatedSetupRequest(cookie)
+        assertTrue(PcglX11SetupCodec.parseRequest(request, wrongCookie) is PcglX11SetupCodec.ParseResult.Rejected)
+    }
+
+    private fun authenticatedSetupRequest(cookie: ByteArray): ByteArray {
+        val authName = PcglX11SetupCodec.MIT_MAGIC_COOKIE_NAME.toByteArray(Charsets.ISO_8859_1)
+        val namePadding = ByteArray(PcglX11SetupCodec.align4(authName.size) - authName.size)
+        val cookiePadding = ByteArray(PcglX11SetupCodec.align4(cookie.size) - cookie.size)
+        val request = ByteBuffer.allocate(12 + authName.size + namePadding.size + cookie.size + cookiePadding.size)
+            .order(ByteOrder.LITTLE_ENDIAN)
+        request.put('l'.code.toByte())
+        request.put(0)
+        request.putShort(11)
+        request.putShort(0)
+        request.putShort(authName.size.toShort())
+        request.putShort(cookie.size.toShort())
+        request.put(authName)
+        request.put(namePadding)
+        request.put(cookie)
+        request.put(cookiePadding)
+        return request.array()
     }
 
     private fun setupRequest(order: ByteOrder): ByteArray {
