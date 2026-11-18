@@ -14,7 +14,7 @@ This is not a renamed Winlator APK. The project uses interoperable runtime compo
 - EXE staging, argument parsing, process tracking, logs, and stop control.
 - Optional official DXVK download, checksum validation, installation, and per-game configuration.
 - Vulkan device and queue capability probe.
-- PCGL-owned Android Surface/EGL session and OpenGL ES diagnostic rendering.
+- PCGL-owned Android Surface/EGL session, GLES shader pipeline, and a pluggable display-backend contract.
 - Device temperature, memory, and process-memory monitor.
 - Per-game virtual keyboard/mouse controls and overlay.
 - Per-game graphics, audio, and controller preferences.
@@ -23,7 +23,7 @@ This is not a renamed Winlator APK. The project uses interoperable runtime compo
 
 The launcher application is its own Android project. Some runtime files are sourced from third-party projects and retain their original licenses. In particular, the current Bionic Wine root filesystem package is based on the Winlator Mali runtime distribution. This is a runtime dependency, not a copy of the Winlator Mali Android application.
 
-**The game display backend is not complete yet.** The current launcher can prepare a Wine prefix and start Box64/Wine processes, but it does not yet own a complete XServer/SDL/EGL window lifecycle. A successful process start or EGL diagnostic test is not proof that a game is visible or playable. No fixed FPS or game compatibility is promised.
+**The game display backend is not complete yet. See [the X11 display integration plan](docs/DISPLAY_BACKEND_INTEGRATION.md).** The current launcher can prepare a Wine prefix and start Box64/Wine processes, but it does not yet own a complete XServer/SDL/EGL window lifecycle. A successful process start or EGL diagnostic test is not proof that a game is visible or playable. No fixed FPS or game compatibility is promised.
 
 ## Architecture direction
 
