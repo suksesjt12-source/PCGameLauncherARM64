@@ -940,72 +940,58 @@ class MainActivity : Activity() {
         val progress = ProgressDialog.show(
             this,
             "Preparing game",
-            "Menyalin EXE ke folder kerja game privat dan memulai Box64/Wine.",
+            "Menyalin EXE ke container game dan menyiapkan tampilan PCGL.",
             true,
             false
         )
 
         Thread {
-            val result = try {
-                val prepared = GameLaunchManager.prepareExecutable(
+            val prepared = try {
+                GameLaunchManager.prepareExecutable(
                     resolver = contentResolver,
                     runtime = runtime,
                     profile = profile,
                     sourceUri = Uri.parse(game.uri),
                     displayName = game.name
                 )
-                val launch = RuntimeExecutionManager.launchWindowsGame(
-                    context = this,
-                    runtime = runtime,
-                    profile = prepared.profile,
-                    executable = prepared.executable,
-                    arguments = arguments
-                )
-                Triple(prepared, launch, null as String?)
             } catch (error: Exception) {
-                Triple(null, null, error.message ?: error.javaClass.simpleName)
+                runOnUiThread {
+                    progress.dismiss()
+                    showMessage("Game tidak siap", error.message ?: error.javaClass.simpleName)
+                }
+                return@Thread
             }
 
             runOnUiThread {
                 progress.dismiss()
-                val prepared = result.first
-                val launch = result.second
-                val error = result.third
-
-                if (prepared == null || launch == null || !launch.success) {
-                    showMessage(
-                        "Game tidak berhasil dimulai",
-                        error ?: launch?.message ?: "Kesalahan runtime yang tidak diketahui."
+                try {
+                    PcglPendingGameLaunch.clear()
+                    PcglPendingGameLaunch.publish(
+                        PcglPendingGameLaunch.Request(
+                            gameName = game.name,
+                            runtime = runtime,
+                            profile = prepared.profile,
+                            executable = prepared.executable,
+                            arguments = arguments
+                        )
                     )
-                    return@runOnUiThread
+                    startActivity(
+                        Intent(this, DisplayTestActivity::class.java)
+                            .putExtra("pcgl_launch_pending_game", true)
+                    )
+                } catch (error: Exception) {
+                    PcglPendingGameLaunch.clear()
+                    showMessage(
+                        "Tidak dapat membuka layar game",
+                        error.message ?: error.javaClass.simpleName
+                    )
                 }
-
-                val details =
-                    "Launch session: ${launch.sessionId}\n" +
-                    "Executable: ${prepared.executable.absolutePath}\n" +
-                    "Guest architecture: ${prepared.architecture}\n" +
-                    "Log: ${launch.logFile?.absolutePath}\n\n" +
-                    launch.message
-
-                if (android.provider.Settings.canDrawOverlays(this)) {
-                    ControllerOverlayManager.show(this, RuntimeExecutionManager.controllerSettings())
-                } else {
-                    AlertDialog.Builder(this)
-                        .setTitle("Aktifkan kontrol mengambang")
-                        .setMessage("Untuk memakai tombol virtual di atas jendela game, izinkan PC Game Launcher tampil di atas aplikasi lain.")
-                        .setNegativeButton("Nanti", null)
-                        .setPositiveButton("Buka pengaturan") { _, _ -> requestOverlayPermission() }
-                        .show()
-                }
-                AlertDialog.Builder(this)
-                    .setTitle("Launch request dikirim")
-                    .setMessage(details)
-                    .setNegativeButton("Close", null)
-                    .setPositiveButton("Stop game") { _, _ -> stopRunningGame() }
-                    .show()
-                buildScreen()
             }
-        }.start()
+        }.apply {
+            name = "PCGL-Game-Preparation"
+            isDaemon = true
+            start()
+        }
     }
 
     private fun stopRunningGame() {
