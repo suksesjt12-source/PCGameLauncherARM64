@@ -362,13 +362,13 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
 
     private fun runCoreDisplayDiagnostics() {
         if (!displayReady || isFinishing || isDestroyed) {
-            statusView.text = "CORE DISPLAY DIAGNOSTICS\\nWait until the Android EGL Surface is ready."
+            statusView.text = "CORE DISPLAY DIAGNOSTICS\nWait until the Android EGL Surface is ready."
             return
         }
         if (x11TestRunning || frameTestRunning || win32TestRunning || pendingGameLaunchStarted ||
             RuntimeExecutionManager.isGameRunning() || PcglX11DisplaySession.isRunning()
         ) {
-            statusView.text = "CORE DISPLAY DIAGNOSTICS\\nStop other sessions or tests before starting."
+            statusView.text = "CORE DISPLAY DIAGNOSTICS\nStop other sessions or tests before starting."
             return
         }
 
@@ -377,14 +377,18 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
         x11TestButton.isEnabled = false
         tcpX11TestButton.isEnabled = false
         uploadTestButton.isEnabled = false
-        statusView.text = "CORE DISPLAY DIAGNOSTICS\\nChecking local X11, authenticated TCP and EGL frame upload..."
+        startX11SessionButton.isEnabled = false
+        stopX11SessionButton.isEnabled = false
+        clearFrameButton.isEnabled = false
+        win32TestButton.isEnabled = false
+        statusView.text = "CORE DISPLAY DIAGNOSTICS\nChecking local X11, authenticated TCP and EGL frame upload..."
         frameView.text = "This automated test does not launch a Windows game. Run the separate Win32 GUI test after these checks pass."
 
         Thread {
             val report = StringBuilder()
             fun stage(value: String) {
                 runOnUiThread {
-                    if (!isDestroyed) statusView.text = "CORE DISPLAY DIAGNOSTICS\\n$value"
+                    if (!isDestroyed) statusView.text = "CORE DISPLAY DIAGNOSTICS\n$value"
                 }
             }
             val frameSink: (PcglWindowFrame) -> Unit = { frame ->
@@ -397,14 +401,14 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
                 File(filesDir, "pcgl/x11-protocol-test"),
                 frameSink
             )
-            report.append("AF_UNIX X11: ").append(localResult.details).append("\\n\\n")
+            report.append("AF_UNIX X11: ").append(localResult.details).append("\n\n")
 
             stage("2/3 - Authenticated loopback TCP X11 self-test")
             val tcpResult = PcglX11TcpProtocolSelfTest.run(
                 File(filesDir, "pcgl/x11-tcp-protocol-test"),
                 frameSink
             )
-            report.append("TCP X11: ").append(tcpResult.details).append("\\n\\n")
+            report.append("TCP X11: ").append(tcpResult.details).append("\n\n")
 
             stage("3/3 - Android EGL frame upload")
             val uploadPixels = ByteArray(64 * 64 * 4)
@@ -443,10 +447,14 @@ class DisplayTestActivity : Activity(), SurfaceHolder.Callback {
                 x11TestButton.isEnabled = true
                 tcpX11TestButton.isEnabled = true
                 uploadTestButton.isEnabled = true
+                startX11SessionButton.isEnabled = true
+                stopX11SessionButton.isEnabled = true
+                clearFrameButton.isEnabled = true
+                win32TestButton.isEnabled = true
                 statusView.text = if (allPassed) {
-                    "CORE DISPLAY DIAGNOSTICS\\nPASS: all three automated checks completed."
+                    "CORE DISPLAY DIAGNOSTICS\nPASS: all three automated checks completed."
                 } else {
-                    "CORE DISPLAY DIAGNOSTICS\\nPARTIAL / FAILED: inspect the report below."
+                    "CORE DISPLAY DIAGNOSTICS\nPARTIAL / FAILED: inspect the report below."
                 }
                 frameView.text = report.toString()
             }
