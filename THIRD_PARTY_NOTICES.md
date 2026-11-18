@@ -27,6 +27,24 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-Wine, DXVK, and other runtime packages are not bundled by this project. Their
-respective licenses and notices must be retained by anyone creating or distributing
-a runtime ZIP.
+## Runtime components and archive libraries
+
+The optional in-app bootstrap downloads the Winlator Mali Bionic root filesystem
+and Proton 9.0 x86_64 runtime from the published
+https://github.com/GunaCharanTeja/Winlator-Extras release assets. The downloaded
+Wine/Proton components remain separate runtime files and are not embedded in this
+repository's source tree. Retain the component authors' license and copyright files
+when redistributing installed runtime contents.
+
+Winlator Mali source reference: https://github.com/GunaCharanTeja/WinlatorMali
+(branch bionic-mali-1.2; MIT-licensed fork; the upstream Winlator code and
+individual runtime components retain their own licenses).
+
+## Zstandard and tar extraction
+
+Zstandard JNI: https://github.com/luben/zstd-jni (BSD 2-Clause License).
+Apache Commons Compress: https://commons.apache.org/proper/commons-compress/
+(Apache License 2.0).
+
+DXVK and other optional graphics components retain their respective upstream
+licenses. Their license texts must accompany any redistributed component package.
