@@ -82,7 +82,7 @@ public class XConnectorEpoll implements Runnable {
         shutdown();
     }
 
-    @Keep
+    
     private void handleNewConnection(int fd) {
         final Client client = new Client(this, new ClientSocket(fd));
         client.connected = true;
@@ -98,7 +98,7 @@ public class XConnectorEpoll implements Runnable {
         connectedClients.put(fd, client);
     }
 
-    @Keep
+    
     private void handleExistingConnection(int fd) {
         Client client = connectedClients.get(fd);
         if (client == null) return;
