@@ -328,7 +328,7 @@ class PcglX11ProtocolServer(
         var foreground = 0
         var background = 0x00ffffff
         var offset = 16
-        for (bit in 0 until 23) {
+        for (bit in 0 until 32) {
             if ((mask and (1 shl bit)) == 0) continue
             val value = readU32(request, offset, state.byteOrder)
             when (bit) {
