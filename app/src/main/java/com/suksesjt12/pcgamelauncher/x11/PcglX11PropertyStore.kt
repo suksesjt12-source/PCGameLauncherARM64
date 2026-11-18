@@ -1,5 +1,7 @@
 package com.suksesjt12.pcgamelauncher.x11
 
+import java.nio.ByteOrder
+
 /** Shared X11 window-property storage. A single server store is visible to all clients. */
 internal class PcglX11PropertyStore {
     data class Property(val type: Int, val format: Int, val value: ByteArray)
@@ -21,9 +23,12 @@ internal class PcglX11PropertyStore {
         format: Int,
         mode: Int,
         newValue: ByteArray,
-        maxBytes: Int
+        maxBytes: Int,
+        clientByteOrder: ByteOrder = ByteOrder.BIG_ENDIAN
     ): ChangeResult {
         if (format !in setOf(8, 16, 32) || mode !in 0..2) return ChangeResult.FORMAT_MISMATCH
+        val bytesPerItem = format / 8
+        if (newValue.size % bytesPerItem != 0) return ChangeResult.FORMAT_MISMATCH
         val properties = windows[window]
         val previous = properties?.get(propertyAtom)
         if (mode != 0 && previous != null) {
@@ -32,14 +37,15 @@ internal class PcglX11PropertyStore {
         }
 
         val previousValue = previous?.value ?: ByteArray(0)
-        val combinedSize = previousValue.size.toLong() + newValue.size.toLong()
-        val outputSize = if (mode == 0) newValue.size.toLong() else combinedSize
+        val canonicalNewValue = convertByteOrder(newValue, format, clientByteOrder, ByteOrder.BIG_ENDIAN)
+        val combinedSize = previousValue.size.toLong() + canonicalNewValue.size.toLong()
+        val outputSize = if (mode == 0) canonicalNewValue.size.toLong() else combinedSize
         if (outputSize > maxBytes.toLong()) return ChangeResult.TOO_LARGE
 
         val combined = when (mode) {
-            0 -> newValue.copyOf()
-            1 -> newValue + previousValue
-            2 -> previousValue + newValue
+            0 -> canonicalNewValue
+            1 -> canonicalNewValue + previousValue
+            2 -> previousValue + canonicalNewValue
             else -> return ChangeResult.FORMAT_MISMATCH
         }
         windows.getOrPut(window) { HashMap() }[propertyAtom] =
@@ -48,9 +54,35 @@ internal class PcglX11PropertyStore {
     }
 
     @Synchronized
-    fun get(window: Int, propertyAtom: Int): Property? {
+    fun get(
+        window: Int,
+        propertyAtom: Int,
+        clientByteOrder: ByteOrder = ByteOrder.BIG_ENDIAN
+    ): Property? {
         val property = windows[window]?.get(propertyAtom) ?: return null
-        return property.copy(value = property.value.copyOf())
+        val clientValue = convertByteOrder(property.value, property.format, ByteOrder.BIG_ENDIAN, clientByteOrder)
+        return property.copy(value = clientValue)
+    }
+
+    /** Properties are stored in canonical big-endian order and converted for each client. */
+    private fun convertByteOrder(
+        value: ByteArray,
+        format: Int,
+        sourceOrder: ByteOrder,
+        destinationOrder: ByteOrder
+    ): ByteArray {
+        if (format == 8 || sourceOrder == destinationOrder) return value.copyOf()
+        val itemSize = format / 8
+        if (value.size % itemSize != 0) return value.copyOf()
+        return ByteArray(value.size).also { converted ->
+            var offset = 0
+            while (offset < value.size) {
+                for (index in 0 until itemSize) {
+                    converted[offset + index] = value[offset + itemSize - index - 1]
+                }
+                offset += itemSize
+            }
+        }
     }
 
     @Synchronized

@@ -103,4 +103,48 @@ class PcglX11PropertyStoreTest {
         firstRead.value[0] = 99
         assertArrayEquals(byteArrayOf(7, 8), store.get(100, 39)!!.value)
     }
+    @Test
+    fun propertyValuesAreNormalizedForBigEndianStorageAndPerClientReads() {
+        val store = PcglX11PropertyStore()
+        val littleEndian = byteArrayOf(0x34, 0x12, 0x78, 0x56)
+        assertEquals(
+            PcglX11PropertyStore.ChangeResult.SUCCESS,
+            store.change(100, 39, 4, 16, 0, littleEndian, 1024, java.nio.ByteOrder.LITTLE_ENDIAN)
+        )
+        assertArrayEquals(
+            byteArrayOf(0x12, 0x34, 0x56, 0x78),
+            store.get(100, 39, java.nio.ByteOrder.BIG_ENDIAN)!!.value
+        )
+        assertArrayEquals(
+            littleEndian,
+            store.get(100, 39, java.nio.ByteOrder.LITTLE_ENDIAN)!!.value
+        )
+    }
+
+    @Test
+    fun format32ValuesAreSwappedAsCompleteWords() {
+        val store = PcglX11PropertyStore()
+        val littleEndian = byteArrayOf(4, 3, 2, 1, 8, 7, 6, 5)
+        store.change(
+            100, 39, 6, 32, 0, littleEndian, 1024,
+            java.nio.ByteOrder.LITTLE_ENDIAN
+        )
+        assertArrayEquals(
+            byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8),
+            store.get(100, 39, java.nio.ByteOrder.BIG_ENDIAN)!!.value
+        )
+        assertArrayEquals(
+            littleEndian,
+            store.get(100, 39, java.nio.ByteOrder.LITTLE_ENDIAN)!!.value
+        )
+    }
+
+    @Test
+    fun malformedWordPayloadIsRejected() {
+        val store = PcglX11PropertyStore()
+        assertEquals(
+            PcglX11PropertyStore.ChangeResult.FORMAT_MISMATCH,
+            store.change(100, 39, 6, 16, 0, byteArrayOf(1), 1024)
+        )
+    }
 }

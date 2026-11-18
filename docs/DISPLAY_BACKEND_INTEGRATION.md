@@ -22,7 +22,7 @@ TCP mode is restricted to loopback and requires a 16-byte MIT-MAGIC-COOKIE-1 val
 
 ## Stage 4.2b — shared X11 window properties
 
-Window properties are stored in one server-owned property table instead of per-client state. XGetProperty and ListProperties therefore read values written by another client on the same server. Replace, Append and Prepend follow the core X11 type/format rules, mutations are memory-bounded, property data is returned through defensive copies, and deleting a window clears its property records. PropertyNotify is delivered to the requesting client when that client selected PropertyChangeMask; cross-client event broadcast and selection ownership remain incomplete.
+Window properties are stored in one server-owned property table instead of per-client state. XGetProperty and ListProperties therefore read values written by another client on the same server. Property values use canonical big-endian storage and are converted to each client's byte order for 16- and 32-bit formats. Replace, Append and Prepend follow the core X11 type/format rules, mutations are memory-bounded, property data is returned through defensive copies, and deleting a window clears its property records. PropertyNotify is broadcast to every live client that selected PropertyChangeMask on the affected window. Selection ownership and full cross-client resource ownership remain incomplete.
 
 ## Stage 4.2a — shared X11 atom registry
 

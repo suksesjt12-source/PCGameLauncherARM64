@@ -156,6 +156,15 @@ public class XConnectorEpoll implements Runnable {
         return connectedClients.get(fd);
     }
 
+    /** Returns a stable snapshot of live clients for server-originated events. */
+    public Client[] snapshotConnectedClients() {
+        Client[] snapshot = new Client[connectedClients.size()];
+        for (int i = 0; i < connectedClients.size(); i++) {
+            snapshot[i] = connectedClients.valueAt(i);
+        }
+        return snapshot;
+    }
+
     public void killConnection(Client client) {
         if (client == null || connectedClients.get(client.clientSocket.fd) != client) return;
         client.connected = false;

@@ -1,5 +1,6 @@
 package com.suksesjt12.pcgamelauncher.x11
 
+import android.os.SystemClock
 import com.suksesjt12.pcgamelauncher.PcglWindowFrame
 import com.suksesjt12.pcgamelauncher.x11.transport.Client
 import java.io.File
@@ -164,9 +165,9 @@ class PcglX11ProtocolServer(
             15 -> queryTree(state, request)
             16 -> internAtom(state, request)
             17 -> getAtomName(state, request)
-            18 -> changeProperty(client, state, request)
-            19 -> deleteProperty(client, state, request)
-            20 -> getProperty(client, state, request)
+            18 -> changeProperty(state, request)
+            19 -> deleteProperty(state, request)
+            20 -> getProperty(state, request)
             21 -> listProperties(state, request)
             42 -> setInputFocus(state, request)
             43 -> getInputFocus(state, request)
@@ -514,7 +515,7 @@ class PcglX11ProtocolServer(
         return output.array()
     }
 
-    private fun changeProperty(client: Client, state: ClientState, request: ByteArray): ByteArray? {
+    private fun changeProperty(state: ClientState, request: ByteArray): ByteArray? {
         if (request.size < 24) return buildError(state, BAD_LENGTH, 0, 18)
         val mode = request[1].toInt() and 0xff
         val window = readU32(request, 4, state.byteOrder)
@@ -537,9 +538,9 @@ class PcglX11ProtocolServer(
             return buildError(state, BAD_LENGTH, 0, 18)
         }
         val newValue = request.copyOfRange(24, 24 + dataLength.toInt())
-        when (propertyStore.change(window, propertyAtom, typeAtom, format, mode, newValue, MAX_PROPERTY_BYTES)) {
+        when (propertyStore.change(window, propertyAtom, typeAtom, format, mode, newValue, MAX_PROPERTY_BYTES, state.byteOrder)) {
             PcglX11PropertyStore.ChangeResult.SUCCESS -> {
-                notifyPropertyChange(client, state, window, propertyAtom, PROPERTY_NEW_VALUE)
+                notifyPropertyChange(window, propertyAtom, PROPERTY_NEW_VALUE)
                 return null
             }
             PcglX11PropertyStore.ChangeResult.TYPE_MISMATCH,
@@ -550,19 +551,19 @@ class PcglX11ProtocolServer(
         }
     }
 
-    private fun deleteProperty(client: Client, state: ClientState, request: ByteArray): ByteArray? {
+    private fun deleteProperty(state: ClientState, request: ByteArray): ByteArray? {
         if (request.size != 12) return buildError(state, BAD_LENGTH, 0, 19)
         val window = readU32(request, 4, state.byteOrder)
         val propertyAtom = readU32(request, 8, state.byteOrder)
         if (!framebuffer.hasWindow(window)) return buildError(state, BAD_WINDOW, window, 19)
         if (propertyAtom == 0) return buildError(state, BAD_ATOM, propertyAtom, 19)
         if (propertyStore.remove(window, propertyAtom)) {
-            notifyPropertyChange(client, state, window, propertyAtom, PROPERTY_DELETE)
+            notifyPropertyChange(window, propertyAtom, PROPERTY_DELETE)
         }
         return null
     }
 
-    private fun getProperty(client: Client, state: ClientState, request: ByteArray): ByteArray? {
+    private fun getProperty(state: ClientState, request: ByteArray): ByteArray? {
         if (request.size != 24) return buildError(state, BAD_LENGTH, 0, 20)
         val delete = request[1].toInt() != 0
         val window = readU32(request, 4, state.byteOrder)
@@ -574,7 +575,7 @@ class PcglX11ProtocolServer(
         if (propertyAtom == 0) return buildError(state, BAD_ATOM, propertyAtom, 20)
         if (longOffset < 0 || longLength < 0) return buildError(state, BAD_VALUE, longOffset, 20)
 
-        val property = propertyStore.get(window, propertyAtom)
+        val property = propertyStore.get(window, propertyAtom, state.byteOrder)
         if (property == null || (requestedType != 0 && requestedType != property.type)) {
             val output = replyBuffer(state.byteOrder, 32, 1, 0, state.sequence, 0)
             output.putInt(0)
@@ -616,20 +617,24 @@ class PcglX11ProtocolServer(
         return output.array()
     }
 
-    private fun notifyPropertyChange(
-        client: Client,
-        state: ClientState,
-        window: Int,
-        atom: Int,
-        propertyState: Int
-    ) {
-        if (((state.eventMasks[window] ?: 0) and PROPERTY_CHANGE) == 0) return
-        val notification = event(state, 28)
-        notification.putInt(4, window)
-        notification.putInt(8, atom)
-        notification.putInt(12, 0) // CurrentTime
-        notification.put(16, propertyState.toByte())
-        writeResponse(client, notification.array())
+    private fun notifyPropertyChange(window: Int, atom: Int, propertyState: Int) {
+        val recipients = transport.snapshotClients()
+        recipients.forEach { recipient ->
+            val recipientState = recipient.getTag() as? ClientState ?: return@forEach
+            if (((recipientState.eventMasks[window] ?: 0) and PROPERTY_CHANGE) == 0) {
+                return@forEach
+            }
+            val notification = event(recipientState, 28)
+            notification.putInt(4, window)
+            notification.putInt(8, atom)
+            notification.putInt(12, SystemClock.uptimeMillis().toInt())
+            notification.put(16, propertyState.toByte())
+            try {
+                writeResponse(recipient, notification.array())
+            } catch (_: IOException) {
+                transport.disconnect(recipient)
+            }
+        }
     }
 
     private fun setInputFocus(state: ClientState, request: ByteArray): ByteArray? {

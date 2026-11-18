@@ -80,6 +80,10 @@ internal class PcglX11Transport(
         return endpoint()
     }
 
+    /** Snapshot of live X11 clients; called by the protocol dispatcher on the epoll thread. */
+    fun snapshotClients(): List<Client> =
+        connector?.snapshotConnectedClients()?.toList() ?: emptyList()
+
     /** Called on the epoll thread; deliberately does not take the lifecycle monitor. */
     fun disconnect(client: Client) {
         connector?.disconnectClient(client)
