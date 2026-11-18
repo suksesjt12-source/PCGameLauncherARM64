@@ -49,6 +49,34 @@ public class XConnectorEpoll implements Runnable {
         }
         epollThread = new Thread(this, "PCGL-X11-epoll");
     }
+ 
+    /** Creates an X11 TCP listener bound only to 127.0.0.1. */
+    public XConnectorEpoll(TcpSocketConfig socketConfig, ConnectionHandler connectionHandler, RequestHandler requestHandler) {
+        this.connectionHandler = connectionHandler;
+        this.requestHandler = requestHandler;
+        serverFd = createLoopbackTcpSocket(socketConfig.port);
+        if (serverFd < 0) throw new RuntimeException("Failed to create a loopback X11 TCP socket.");
+
+        epollFd = createEpollFd();
+        if (epollFd < 0) {
+            closeFd(serverFd);
+            throw new RuntimeException("Failed to create epoll fd.");
+        }
+        if (!addFdToEpoll(epollFd, serverFd)) {
+            closeFd(serverFd);
+            closeFd(epollFd);
+            throw new RuntimeException("Failed to add TCP server fd to epoll.");
+        }
+
+        shutdownFd = createEventFd();
+        if (!addFdToEpoll(epollFd, shutdownFd)) {
+            closeFd(serverFd);
+            closeFd(shutdownFd);
+            closeFd(epollFd);
+            throw new RuntimeException("Failed to add shutdown fd to epoll.");
+        }
+        epollThread = new Thread(this, "PCGL-X11-TCP-epoll");
+    }
 
     public synchronized void start() {
         if (running || epollThread == null) return;
@@ -196,4 +224,5 @@ public class XConnectorEpoll implements Runnable {
     private native void removeFdFromEpoll(int epollFd, int fd);
     private native boolean waitForSocketRead(int clientFd, int shutdownFd);
     private native int createAFUnixSocket(String path);
+    private native int createLoopbackTcpSocket(int port);
 }
