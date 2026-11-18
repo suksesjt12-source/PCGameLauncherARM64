@@ -129,7 +129,6 @@ object WineRuntimeEnvironment {
 
         environment["BOX64_NOBANNER"] = "1"
         environment["BOX64_DYNAREC"] = "1"
-        environment["BOX64_X11GLX"] = "1"
         environment["BOX64_NORCFILES"] = "1"
         if (NativeBridge.device().contains("Mali", ignoreCase = true)) {
             environment["BOX64_MMAP32"] = "0"
