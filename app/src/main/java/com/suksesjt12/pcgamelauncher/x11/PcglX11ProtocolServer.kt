@@ -29,6 +29,8 @@ class PcglX11ProtocolServer(
         val authCookie: ByteArray? = null
     )
 
+    private data class XProperty(val type: Int, val format: Int, val value: ByteArray)
+
     private data class ClientState(
         var byteOrder: ByteOrder = ByteOrder.LITTLE_ENDIAN,
         var setupComplete: Boolean = false,
@@ -37,6 +39,9 @@ class PcglX11ProtocolServer(
         val atomsByName: MutableMap<String, Int> = HashMap(),
         val namesByAtom: MutableMap<Int, String> = HashMap(),
         val eventMasks: MutableMap<Int, Int> = HashMap(),
+        val properties: MutableMap<Int, MutableMap<Int, XProperty>> = HashMap(),
+        var focusedWindow: Int = PcglX11SetupCodec.ROOT_WINDOW_ID,
+        var revertTo: Int = 1,
         var nextAtom: Int = 1
     )
 
@@ -163,6 +168,11 @@ class PcglX11ProtocolServer(
             15 -> queryTree(state, request)
             16 -> internAtom(state, request)
             17 -> getAtomName(state, request)
+            18 -> changeProperty(state, request)
+            19 -> deleteProperty(state, request)
+            20 -> getProperty(state, request)
+            21 -> listProperties(state, request)
+            42 -> setInputFocus(state, request)
             43 -> getInputFocus(state, request)
             53 -> createPixmap(state, request)
             54 -> freePixmap(state, request)
@@ -502,10 +512,120 @@ class PcglX11ProtocolServer(
         return output.array()
     }
 
+    private fun changeProperty(state: ClientState, request: ByteArray): ByteArray? {
+        if (request.size < 24) return buildError(state, BAD_LENGTH, 0, 18)
+        val mode = request[1].toInt() and 0xff
+        val window = readU32(request, 4, state.byteOrder)
+        val propertyAtom = readU32(request, 8, state.byteOrder)
+        val typeAtom = readU32(request, 12, state.byteOrder)
+        val format = request[16].toInt() and 0xff
+        val itemCount = readU32(request, 20, state.byteOrder)
+        if (!framebuffer.hasWindow(window)) return buildError(state, BAD_WINDOW, window, 18)
+        if (propertyAtom == 0 || typeAtom == 0) return buildError(state, BAD_ATOM, if (propertyAtom == 0) propertyAtom else typeAtom, 18)
+        if (mode !in 0..2 || format !in setOf(8, 16, 32) || itemCount < 0) {
+            return buildError(state, BAD_VALUE, itemCount, 18)
+        }
+        val bytesPerItem = format / 8
+        val dataLength = itemCount.toLong() * bytesPerItem
+        if (dataLength > MAX_PROPERTY_BYTES || 24L + PcglX11SetupCodec.align4(dataLength.toInt()) != request.size.toLong()) {
+            return buildError(state, BAD_LENGTH, 0, 18)
+        }
+        val newValue = request.copyOfRange(24, 24 + dataLength.toInt())
+        val windowProperties = state.properties.getOrPut(window) { HashMap() }
+        val previous = windowProperties[propertyAtom]
+        if (previous != null && previous.format != format) {
+            return buildError(state, BAD_MATCH, propertyAtom, 18)
+        }
+        val combined = when (mode) {
+            0 -> newValue
+            1 -> (newValue + (previous?.value ?: ByteArray(0)))
+            2 -> ((previous?.value ?: ByteArray(0)) + newValue)
+            else -> newValue
+        }
+        if (combined.size > MAX_PROPERTY_BYTES) return buildError(state, BAD_ALLOC, propertyAtom, 18)
+        windowProperties[propertyAtom] = XProperty(typeAtom, format, combined)
+        return null
+    }
+
+    private fun deleteProperty(state: ClientState, request: ByteArray): ByteArray? {
+        if (request.size != 12) return buildError(state, BAD_LENGTH, 0, 19)
+        val window = readU32(request, 4, state.byteOrder)
+        val propertyAtom = readU32(request, 8, state.byteOrder)
+        if (!framebuffer.hasWindow(window)) return buildError(state, BAD_WINDOW, window, 19)
+        if (propertyAtom == 0) return buildError(state, BAD_ATOM, propertyAtom, 19)
+        state.properties[window]?.remove(propertyAtom)
+        return null
+    }
+
+    private fun getProperty(state: ClientState, request: ByteArray): ByteArray? {
+        if (request.size != 24) return buildError(state, BAD_LENGTH, 0, 20)
+        val delete = request[1].toInt() != 0
+        val window = readU32(request, 4, state.byteOrder)
+        val propertyAtom = readU32(request, 8, state.byteOrder)
+        val requestedType = readU32(request, 12, state.byteOrder)
+        val longOffset = readU32(request, 16, state.byteOrder)
+        val longLength = readU32(request, 20, state.byteOrder)
+        if (!framebuffer.hasWindow(window)) return buildError(state, BAD_WINDOW, window, 20)
+        if (propertyAtom == 0) return buildError(state, BAD_ATOM, propertyAtom, 20)
+        if (longOffset < 0 || longLength < 0) return buildError(state, BAD_VALUE, longOffset, 20)
+
+        val property = state.properties[window]?.get(propertyAtom)
+        if (property == null || (requestedType != 0 && requestedType != property.type)) {
+            val output = replyBuffer(state.byteOrder, 32, 1, 0, state.sequence, 0)
+            output.putInt(0)
+            repeat(24) { output.put(0) }
+            return output.array()
+        }
+
+        val offsetBytes = longOffset.toLong() * 4L
+        if (offsetBytes > property.value.size) return buildError(state, BAD_VALUE, longOffset, 20)
+        val start = offsetBytes.toInt()
+        val requestedBytes = longLength.toLong() * 4L
+        val end = (start.toLong() + requestedBytes).coerceAtMost(property.value.size.toLong()).toInt()
+        val value = property.value.copyOfRange(start, end)
+        val bytesAfter = property.value.size - end
+        val paddedLength = PcglX11SetupCodec.align4(value.size)
+        val output = replyBuffer(state.byteOrder, 32 + paddedLength, 1, property.format, state.sequence, paddedLength / 4)
+        output.putInt(property.type)
+        output.putInt(bytesAfter)
+        val itemCount = value.size / (property.format / 8)
+        output.putInt(itemCount)
+        repeat(12) { output.put(0) }
+        output.put(value)
+        repeat(paddedLength - value.size) { output.put(0) }
+        if (delete && bytesAfter == 0) state.properties[window]?.remove(propertyAtom)
+        return output.array()
+    }
+
+    private fun listProperties(state: ClientState, request: ByteArray): ByteArray? {
+        if (request.size != 8) return buildError(state, BAD_LENGTH, 0, 21)
+        val window = readU32(request, 4, state.byteOrder)
+        if (!framebuffer.hasWindow(window)) return buildError(state, BAD_WINDOW, window, 21)
+        val atoms = state.properties[window]?.keys?.toList().orEmpty()
+        val output = replyBuffer(state.byteOrder, 32 + atoms.size * 4, 1, 0, state.sequence, atoms.size)
+        output.putShort(atoms.size.toShort())
+        repeat(22) { output.put(0) }
+        atoms.forEach { output.putInt(it) }
+        return output.array()
+    }
+
+    private fun setInputFocus(state: ClientState, request: ByteArray): ByteArray? {
+        if (request.size != 12) return buildError(state, BAD_LENGTH, 0, 42)
+        val revertTo = request[1].toInt() and 0xff
+        val focus = readU32(request, 4, state.byteOrder)
+        if (revertTo !in 0..2) return buildError(state, BAD_VALUE, revertTo, 42)
+        if (focus != 0 && focus != 1 && !framebuffer.hasWindow(focus)) {
+            return buildError(state, BAD_WINDOW, focus, 42)
+        }
+        state.focusedWindow = if (focus == 0 || focus == 1) PcglX11SetupCodec.ROOT_WINDOW_ID else focus
+        state.revertTo = revertTo
+        return null
+    }
+
     private fun getInputFocus(state: ClientState, request: ByteArray): ByteArray {
         if (request.size != 4) return buildError(state, BAD_LENGTH, 0, 43)
         val output = replyBuffer(state.byteOrder, 32, 1, 1, state.sequence, 0)
-        output.putInt(PcglX11SetupCodec.ROOT_WINDOW_ID)
+        output.putInt(state.focusedWindow)
         repeat(20) { output.put(0) }
         return output.array()
     }
@@ -696,6 +816,7 @@ class PcglX11ProtocolServer(
     private companion object {
         const val MAX_BUFFERED_BYTES = 1024 * 1024
         const val MAX_REQUEST_BYTES = 262140
+        const val MAX_PROPERTY_BYTES = 1024 * 1024
         const val BAD_REQUEST = 1
         const val BAD_VALUE = 2
         const val BAD_WINDOW = 3
