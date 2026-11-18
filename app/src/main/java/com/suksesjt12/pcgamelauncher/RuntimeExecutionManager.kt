@@ -214,7 +214,7 @@ object RuntimeExecutionManager {
                 true,
                 System.currentTimeMillis().toString(),
                 logFile,
-                "Box64/Wine process berhasil dimulai. Ini belum menjamin game berhasil masuk ke menu.\n$inputStatus\nInput ini memetakan tombol virtual ke keyboard/mouse Windows; bukan perangkat XInput/SDL."
+                "Proses Box64/Wine berhasil dimulai. Ini hanya mengonfirmasi proses guest berjalan, bukan tampilan game. Backend XServer/SDL belum aktif pada launcher ini; game grafis kemungkinan tidak akan terlihat sampai subsistem layar diintegrasikan.\n$inputStatus\nInput ini memetakan tombol virtual ke keyboard/mouse Windows; bukan perangkat XInput/SDL."
             )
         } catch (error: IOException) {
             WineInputBridge.stop()
