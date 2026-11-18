@@ -58,8 +58,7 @@ to be visible. Resolution remains a preferred profile setting until a Wine displ
 surface exists. DXVK HUD can show in-game FPS only when the game actually renders through a
 compatible DXVK/Vulkan path.
 
-The launch screen can confirm that the Box64 process started, but only device testing with
-a compatible Wine package and actual game content can establish whether the game runs.
+The launcher configures the Bionic rootfs paths used by Winlator Mali, including host LD_LIBRARY_PATH, PATH, HOME, XDG/fontconfig/Vulkan-wrapper paths, and Mali Box64 flags. It still lacks the Winlator XServer/SDL window lifecycle and complete audio/display service startup path. A successful setup or Wine process start does not establish that a game will render visibly or be playable.
 
 A Windows EXE cannot generally be recompiled into a native Android APK without the game's
 source code. This project is a compatibility launcher, not an EXE-to-APK converter.
