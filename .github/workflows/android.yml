@@ -12,6 +12,10 @@ on:
       - "settings.gradle"
       - ".github/workflows/android.yml"
 
+concurrency:
+  group: pcgl-android-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
