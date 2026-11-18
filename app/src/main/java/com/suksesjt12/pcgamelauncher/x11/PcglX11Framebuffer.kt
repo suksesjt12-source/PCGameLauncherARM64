@@ -50,6 +50,9 @@ internal class PcglX11Framebuffer(
         id == PcglX11SetupCodec.ROOT_WINDOW_ID || drawables[id]?.mapped == true
 
     @Synchronized
+    fun parentOf(id: Int): Int? = drawables[id]?.takeIf { it.isWindow }?.parentId
+
+    @Synchronized
     fun geometry(id: Int): Geometry? {
         if (id == PcglX11SetupCodec.ROOT_WINDOW_ID) {
             return Geometry(0, 0, screenWidth, screenHeight, 24)
