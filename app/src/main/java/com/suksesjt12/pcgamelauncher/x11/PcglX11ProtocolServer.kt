@@ -814,6 +814,7 @@ class PcglX11ProtocolServer(
         ByteBuffer.wrap(bytes, offset, 4).order(byteOrder).int
 
     private companion object {
+        const val Z_PIXMAP = 2
         const val MAX_BUFFERED_BYTES = 1024 * 1024
         const val MAX_REQUEST_BYTES = 262140
         const val MAX_PROPERTY_BYTES = 1024 * 1024

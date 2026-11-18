@@ -14,6 +14,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.suksesjt12.pcgamelauncher.x11.PcglX11ProtocolSelfTest
+import com.suksesjt12.pcgamelauncher.x11.PcglX11TcpProtocolSelfTest
 import com.suksesjt12.pcgamelauncher.x11.PcglX11DisplaySession
 import java.io.File
 import java.util.concurrent.CountDownLatch
