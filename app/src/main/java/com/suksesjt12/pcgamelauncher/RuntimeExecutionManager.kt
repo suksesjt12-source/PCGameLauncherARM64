@@ -126,12 +126,15 @@ object RuntimeExecutionManager {
                 .redirectOutput(logFile)
 
             builder.environment().apply {
-                put("HOME", home.absolutePath)
-                put("TMPDIR", temp.absolutePath)
-                put("WINEPREFIX", prefixRoot.absolutePath)
                 put("WINEDEBUG", "-all")
-                put("BOX64_NOBANNER", "1")
-                put("PATH", runtime.wine64.parentFile.absolutePath + File.pathSeparator + (get("PATH") ?: ""))
+                WineRuntimeEnvironment.apply(
+                    context = context,
+                    runtime = runtime,
+                    prefix = prefixRoot,
+                    environment = this,
+                    audioMode = gameSettings.audioMode,
+                    pulseLatencyMs = gameSettings.pulseLatencyMs
+                )
                 if (dxvkEnabled && dxvkConfig != null) {
                     val dxvkCache = File(prefixRoot, "shader-cache/dxvk")
                     if (!dxvkCache.exists()) dxvkCache.mkdirs()
@@ -146,18 +149,6 @@ object RuntimeExecutionManager {
                 } else {
                     remove("DXVK_CONFIG_FILE")
                     remove("DXVK_HUD")
-                }
-                if (gameSettings.audioMode == "pulseaudio") {
-                    // This is a PulseAudio client hint; it does not install or start a server.
-                    put("PULSE_LATENCY_MSEC", gameSettings.pulseLatencyMs.toString())
-                } else {
-                    remove("PULSE_LATENCY_MSEC")
-                }
-                if (runtime.libraryPaths.isNotEmpty()) {
-                    put(
-                        "BOX64_LD_LIBRARY_PATH",
-                        runtime.libraryPaths.joinToString(File.pathSeparator) { it.absolutePath }
-                    )
                 }
             }
 
@@ -265,16 +256,13 @@ object RuntimeExecutionManager {
                     .redirectOutput(stopLog)
 
                 killer.environment().apply {
-                    put("HOME", File(prefix, "home").absolutePath)
-                    put("WINEPREFIX", prefix.absolutePath)
                     put("WINEDEBUG", "-all")
-                    put("BOX64_NOBANNER", "1")
-                    if (runtime.libraryPaths.isNotEmpty()) {
-                        put(
-                            "BOX64_LD_LIBRARY_PATH",
-                            runtime.libraryPaths.joinToString(File.pathSeparator) { it.absolutePath }
-                        )
-                    }
+                    WineRuntimeEnvironment.apply(
+                        context = context,
+                        runtime = runtime,
+                        prefix = prefix,
+                        environment = this
+                    )
                 }
                 val serverStop = killer.start()
                 serverStop.waitFor(8, TimeUnit.SECONDS)
@@ -402,17 +390,13 @@ object RuntimeExecutionManager {
                 .redirectOutput(logFile)
 
             builder.environment().apply {
-                put("HOME", home.absolutePath)
-                put("TMPDIR", temp.absolutePath)
-                put("WINEPREFIX", prefix.absolutePath)
                 put("WINEDEBUG", "-all")
-                put("BOX64_NOBANNER", "1")
-                if (runtime.libraryPaths.isNotEmpty()) {
-                    put(
-                        "BOX64_LD_LIBRARY_PATH",
-                        runtime.libraryPaths.joinToString(File.pathSeparator) { it.absolutePath }
-                    )
-                }
+                WineRuntimeEnvironment.apply(
+                    context = context,
+                    runtime = runtime,
+                    prefix = prefix,
+                    environment = this
+                )
             }
 
             val process = builder.start()
