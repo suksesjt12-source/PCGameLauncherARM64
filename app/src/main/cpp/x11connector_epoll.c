@@ -5,6 +5,8 @@
 #include <sys/types.h>
 #include <sys/eventfd.h>
 #include <sys/un.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <unistd.h>
 #include <string.h>
 #include <stddef.h>
@@ -50,6 +52,35 @@ Java_com_suksesjt12_pcgamelauncher_x11_transport_XConnectorEpoll_createAFUnixSoc
 
     return fd;
     error:
+    close(fd);
+    return -1;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_suksesjt12_pcgamelauncher_x11_transport_XConnectorEpoll_createLoopbackTcpSocket(JNIEnv *env, jobject obj,
+                                                                                          jint port) {
+    if (port < 6000 || port > 65535) return -1;
+
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return -1;
+
+    int enabled = 1;
+    int sockBufSize = 2 * 1024 * 1024;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled));
+    setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &sockBufSize, sizeof(sockBufSize));
+    setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sockBufSize, sizeof(sockBufSize));
+
+    struct sockaddr_in address;
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_port = htons((uint16_t) port);
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+    if (bind(fd, (struct sockaddr*) &address, sizeof(address)) < 0) goto tcp_error;
+    if (listen(fd, MAX_EVENTS) < 0) goto tcp_error;
+    return fd;
+
+tcp_error:
     close(fd);
     return -1;
 }
