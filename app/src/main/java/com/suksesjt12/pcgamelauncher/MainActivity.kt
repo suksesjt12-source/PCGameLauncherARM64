@@ -150,6 +150,7 @@ class MainActivity : Activity() {
         ) { installRuntimeComponents() }, buttonParams())
         content.addView(actionButton("DOWNLOAD / UPDATE OFFICIAL DXVK") { downloadOfficialDxvk() }, buttonParams())
         content.addView(actionButton("TEST BOX64 + WINE") { probeRuntime() }, buttonParams())
+        content.addView(actionButton("OPEN FULL MALI GRAPHICS ENGINE") { openFullMaliEngine() }, buttonParams())
         content.addView(actionButton("SHOW / HIDE FLOATING CONTROLS") { toggleControllerOverlay() }, buttonParams())
         content.addView(actionButton("STOP RUNNING GAME") { stopRunningGame() }, buttonParams())
 
@@ -208,6 +209,33 @@ class MainActivity : Activity() {
     }
 
     private fun matchWidth() = LinearLayout.LayoutParams(-1, -2)
+
+    private fun openFullMaliEngine() {
+        val enginePackage = "com.suksesjt12.pcgamelauncher.engine"
+        val launchIntent = packageManager.getLaunchIntentForPackage(enginePackage)
+        if (launchIntent != null) {
+            startActivity(launchIntent)
+            return
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Full Mali graphics engine belum dipasang")
+            .setMessage(
+                "Engine penuh dibangun terpisah agar instalasi launcher lama dan data game tidak tertimpa. " +
+                    "Buka GitHub Actions, unduh artifact PCGameLauncher-Mali-Engine-debug, ekstrak APK, " +
+                    "lalu pasang aplikasi pendamping tersebut."
+            )
+            .setPositiveButton("Buka GitHub Actions") { _, _ ->
+                startActivity(
+                    Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("https://github.com/suksesjt12-source/PCGameLauncherARM64/actions/workflows/pcgl-mali-engine.yml")
+                    )
+                )
+            }
+            .setNegativeButton("Tutup", null)
+            .show()
+    }
 
     private fun chooseExe() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
